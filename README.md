@@ -539,8 +539,4 @@ See `.gitlab-ci.yml` for GitLab pipeline configuration.
 
 ## License
 
-Proprietary - Internal use only
-
-## Maintainers
-
-Platform Engineering Team
+GPLv3 - See [LICENSE](LICENSE) for details.
