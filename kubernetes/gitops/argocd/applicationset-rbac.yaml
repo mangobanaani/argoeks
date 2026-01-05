@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: rbac-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: "{{name}}-rbac"
+    spec:
+      project: default
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/rbac
+      destination:
+        server: "{{server}}"
+        namespace: kube-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+

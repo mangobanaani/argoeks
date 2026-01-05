@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: feast
+resources:
+  - ../../upstream # Place vendored Feast manifests here (or Helm chart via OCI)
+patches:
+  - target:
+      version: v1
+      kind: ConfigMap
+      name: feast-config
+    patch: |-
+      - op: add
+        path: /data
+        value:
+          online_store: dynamodb
+          offline_store: s3
+

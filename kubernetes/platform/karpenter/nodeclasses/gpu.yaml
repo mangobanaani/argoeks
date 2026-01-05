@@ -1,0 +1,95 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: gpu
+spec:
+  amiSelectorTerms:
+    # Use GPU-optimized AMI with NVIDIA drivers
+    - alias: al2023@latest
+
+  # IAM role created by Terraform module
+  role: "CLUSTER_NAME-karpenter-node"
+
+  # GPU nodes should be in same subnet/AZ for optimal EFA performance
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "CLUSTER_NAME"
+        workload-type: "gpu"
+
+  # Security group discovery
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "CLUSTER_NAME"
+
+  # Larger root volume for ML models and datasets
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 500Gi
+        volumeType: gp3
+        iops: 10000
+        throughput: 1000
+        encrypted: true
+        deleteOnTermination: true
+
+  # Instance metadata configuration
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required
+
+  # User data for GPU and Cilium setup
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    set -ex
+
+    # Install NVIDIA drivers if not present in AMI
+    if ! command -v nvidia-smi &> /dev/null; then
+        echo "Installing NVIDIA drivers..."
+        # AL2023 uses dnf
+        dnf install -y kernel-modules-extra
+        dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+        dnf clean all
+        dnf install -y nvidia-driver-latest-dkms
+        dnf install -y cuda-drivers
+    fi
+
+    # Install NVIDIA container runtime
+    if ! command -v nvidia-container-runtime &> /dev/null; then
+        echo "Installing NVIDIA container runtime..."
+        dnf install -y nvidia-container-toolkit
+        nvidia-ctk runtime configure --runtime=containerd
+        systemctl restart containerd
+    fi
+
+    # Verify GPU detection
+    nvidia-smi || echo "WARNING: nvidia-smi failed"
+
+    # Tag instance
+    EC2_INSTANCE_ID=$(ec2-metadata --instance-id | cut -d " " -f 2)
+    EC2_REGION=$(ec2-metadata --availability-zone | cut -d " " -f 2 | sed 's/[a-z]$//')
+
+    aws ec2 create-tags \
+      --resources ${EC2_INSTANCE_ID} \
+      --tags \
+        Key=cni,Value=cilium \
+        Key=workload-type,Value=gpu \
+        Key=nvidia.com/gpu,Value=present \
+      --region ${EC2_REGION}
+
+    --BOUNDARY--
+
+  # Tags applied to all GPU instances
+  tags:
+    cni: cilium
+    managed-by: karpenter
+    workload-type: gpu
+    nvidia.com/gpu: "present"
+    node-lifecycle: on-demand-preferred

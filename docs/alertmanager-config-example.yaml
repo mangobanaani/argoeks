@@ -1,0 +1,21 @@
+route:
+  receiver: primary
+  group_by: ['alertname','cluster','namespace']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+receivers:
+  - name: primary
+    slack_configs:
+      - channel: "#mlops-alerts"
+        send_resolved: true
+        api_url: "<slack_webhook_url>"
+        title: '[{{ .CommonLabels.cluster }}] {{ .CommonAnnotations.summary }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+    pagerduty_configs:
+      - service_key: "<pagerduty_service_key>"
+        send_resolved: true
+inhibit_rules:
+  - source_match: { severity: 'critical' }
+    target_match: { severity: 'warning' }
+    equal: ['alertname','cluster','namespace']

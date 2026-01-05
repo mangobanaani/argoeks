@@ -1,0 +1,19 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-runtime
+  namespace: kserve
+spec:
+  supportedModelFormats:
+    - name: vllm
+      version: "0"
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: vllm/vllm-openai:latest
+      args: ["--model", "${MODEL_LOCATION}", "--dtype", "float16"]
+      ports:
+        - containerPort: 8000
+      resources:
+        limits:
+          nvidia.com/gpu: 1

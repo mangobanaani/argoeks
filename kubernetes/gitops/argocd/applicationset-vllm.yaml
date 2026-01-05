@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: vllm-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            vllm: "enabled"
+  template:
+    metadata:
+      name: "{{name}}-vllm"
+    spec:
+      project: platform
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/serving/vllm/overlays/{{metadata.labels.environment}}
+      destination:
+        server: "{{server}}"
+        namespace: vllm
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: ["CreateNamespace=true"]
+

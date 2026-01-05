@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: alertmanager-es-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: "{{name}}-alertmanager-es"
+    spec:
+      project: platform
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/external-secrets/alertmanager/{{metadata.labels.environment}}
+      destination:
+        server: "{{server}}"
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+

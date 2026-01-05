@@ -1,0 +1,267 @@
+# Optional Modules - Commented Examples
+#
+# This file contains ready-to-use configurations for optional modules.
+# Uncomment and configure the sections you need, then rename to optional-modules.tf
+#
+# See docs/STACK_OPTIMIZATION_2026-01.md for module details and use cases
+
+# =============================================================================
+# VPC Lattice - Multi-VPC/Region Service Mesh
+# =============================================================================
+# Use when: Cross-environment service access, multi-region communication
+# Value: Simpler than VPC peering, works alongside Cilium cluster mesh
+# Cost: ~$0.025/hour per service + data transfer
+# Docs: https://aws.amazon.com/vpc/lattice/
+
+# module "vpc_lattice" {
+#   source = "../../modules/ingress/vpc_lattice_core"
+#
+#   name    = "dev-service-network"
+#   vpc_ids = values(module.cluster_factory.vpc_ids)
+#
+#   tags = merge(local.common_tags, {
+#     Purpose = "cross-vpc-service-mesh"
+#   })
+# }
+#
+# # Example: Expose vLLM inference service via VPC Lattice
+# # resource "aws_vpclattice_service" "vllm_inference" {
+# #   name                      = "vllm-inference"
+# #   custom_domain_name        = "vllm.${var.private_domain}"
+# #   auth_type                 = "AWS_IAM"
+# #   service_network_identifier = module.vpc_lattice.service_network_id
+# # }
+
+# =============================================================================
+# Memcached - High-Throughput Caching
+# =============================================================================
+# Use when: Need distributed caching with multi-threading vs Redis
+# Value: Higher throughput for simple key-value caching (no persistence)
+# Cost: ~$0.017/hour for cache.t3.micro
+# Choose Redis if: Need persistence, pub/sub, complex data structures
+
+# module "memcached" {
+#   source = "../../modules/cache/elasticache_memcached"
+#
+#   name                = "dev-mlops-memcached"
+#   vpc_id              = module.cluster_factory.vpc_ids[module.cluster_factory.cluster_names[0]]
+#   subnet_ids          = module.cluster_factory.private_subnets[module.cluster_factory.cluster_names[0]]
+#   vpc_cidr            = local.hub_vpc_cidr
+#   node_type           = "cache.t3.micro"
+#   num_cache_nodes     = 2
+#   parameter_group     = "default.memcached1.6"
+#   engine_version      = "1.6.17"
+#   az_mode             = "cross-az"
+#   maintenance_window  = "sun:05:00-sun:07:00"
+#   apply_immediately   = false
+#
+#   tags = local.common_tags
+# }
+
+# =============================================================================
+# NGINX Ingress Controller - Advanced K8s Ingress
+# =============================================================================
+# Use when: Need advanced routing features vs AWS Load Balancer Controller
+# Value: More K8s-native, better WebSocket support, custom annotations
+# Note: AWS LBC is default; use this for specific NGINX features
+# Docs: https://kubernetes.github.io/ingress-nginx/
+
+# module "ingress_nginx" {
+#   source = "../../modules/addons/ingress_nginx"
+#
+#   namespace        = "ingress-nginx"
+#   chart_version    = "4.9.0"
+#   replica_count    = 2
+#   enable_metrics   = true
+#   service_type     = "LoadBalancer"
+#   use_internal_lb  = true
+#
+#   custom_values = {
+#     controller = {
+#       resources = {
+#         limits   = { cpu = "500m", memory = "512Mi" }
+#         requests = { cpu = "250m", memory = "256Mi" }
+#       }
+#       config = {
+#         use-forwarded-headers    = "true"
+#         compute-full-forwarded-for = "true"
+#         use-proxy-protocol       = "false"
+#       }
+#     }
+#   }
+#
+#   providers = {
+#     kubernetes = kubernetes.hub
+#     helm       = helm.hub
+#   }
+# }
+
+# =============================================================================
+# Aurora Global Database - Multi-Region Replication
+# =============================================================================
+# Use when: Need cross-region replication with <1s latency
+# Value: Global read replicas for ML model serving, disaster recovery
+# Cost: ~2x primary cluster cost for secondary region
+# Note: Requires primary Aurora cluster first
+
+# module "aurora_global" {
+#   source = "../../modules/db/aurora_global"
+#
+#   global_cluster_identifier = "dev-mlops-global"
+#   primary_cluster_id        = module.aurora[0].cluster_id  # Must exist
+#   secondary_regions         = ["us-west-2"]
+#   engine                    = "aurora-postgresql"
+#   engine_version            = "15.4"
+#   database_name             = "mlops"
+#
+#   # Secondary region config
+#   secondary_vpc_ids     = { "us-west-2" = "vpc-xxxxx" }
+#   secondary_subnet_ids  = { "us-west-2" = ["subnet-a", "subnet-b"] }
+#   secondary_vpc_cidrs   = { "us-west-2" = "10.128.0.0/8" }
+#
+#   # Replication
+#   replication_source_identifier = module.aurora[0].cluster_arn
+#
+#   tags = local.common_tags
+# }
+
+# =============================================================================
+# AWS IoT Greengrass v2 - Edge ML Deployment
+# =============================================================================
+# Use when: Edge ML inference (factories, retail stores, IoT devices)
+# Value: Deploy ML models to edge devices, offline inference
+# Cost: Free for core software, pay for AWS IoT Core messages
+# Docs: https://aws.amazon.com/greengrass/
+
+# module "greengrass" {
+#   source = "../../modules/edge/greengrass_v2"
+#
+#   environment     = "dev"
+#   component_name  = "ml-inference-edge"
+#   component_version = "1.0.0"
+#
+#   # S3 bucket for model artifacts
+#   artifact_bucket = var.vllm_bucket_arn
+#
+#   # IAM role for edge devices
+#   device_role_name = "dev-greengrass-ml-edge"
+#   device_policies = [
+#     "arn:aws:iam::aws:policy/AWSIoTFullAccess",
+#     "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+#   ]
+#
+#   # Component configuration
+#   component_config = {
+#     model_path     = "s3://models/vllm/llama-7b"
+#     inference_port = 8080
+#     batch_size     = 4
+#   }
+#
+#   tags = local.common_tags
+# }
+
+# =============================================================================
+# ECR Image Scanning - Container Security
+# =============================================================================
+# Use when: Need automated container vulnerability scanning
+# Value: Compliance (SOC2, PCI-DSS), security posture monitoring
+# Cost: Free for basic scanning, ~$0.09 per image for enhanced (Inspector)
+# Docs: https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-scanning.html
+
+# module "ecr_scanning" {
+#   source = "../../modules/container/ecr_scanning"
+#
+#   # Repositories to scan
+#   repository_names = [
+#     "vllm-inference",
+#     "triton-server",
+#     "mlflow-server",
+#     "feast-server"
+#   ]
+#
+#   # Scanning configuration
+#   scan_type               = "ENHANCED"  # or "BASIC"
+#   scan_on_push            = true
+#   continuous_scanning     = true
+#
+#   # Findings configuration
+#   severity_threshold      = "MEDIUM"    # CRITICAL, HIGH, MEDIUM, LOW
+#   findings_retention_days = 90
+#
+#   # SNS notifications for critical findings
+#   enable_notifications    = true
+#   sns_topic_arn          = module.notifications.sns_topic_arn
+#
+#   # Lifecycle policy (clean up old images)
+#   enable_lifecycle_policy = true
+#   keep_last_n_images     = 10
+#   expire_untagged_days   = 7
+#
+#   tags = local.common_tags
+# }
+
+# =============================================================================
+# MLflow - Terraform-Managed Deployment
+# =============================================================================
+# Use when: Want infrastructure-as-code MLflow deployment
+# Value: Repeatable MLflow deployments, version controlled config
+# Note: Currently MLflow may be deployed via Helm/ArgoCD instead
+# Alternative: Use ml_workloads_irsa module for IRSA only
+
+# module "mlflow" {
+#   source = "../../modules/ml/mlflow"
+#
+#   namespace          = var.mlflow_namespace
+#   service_account    = var.mlflow_service_account
+#   chart_version      = "0.7.19"
+#
+#   # Backend store (PostgreSQL)
+#   backend_store_uri = "postgresql://${module.rds_postgres[0].endpoint}/mlflow"
+#   backend_store_secret = {
+#     username = "mlflow"
+#     password_secret_arn = aws_secretsmanager_secret.mlflow_db_password.arn
+#   }
+#
+#   # Artifact store (S3)
+#   artifact_store_uri = "s3://${var.mlflow_artifacts_bucket_arn}"
+#   irsa_role_arn     = module.ml_workloads_irsa.role_arns["mlflow"]
+#
+#   # Service configuration
+#   service_type      = "ClusterIP"
+#   enable_ingress    = true
+#   ingress_host      = "mlflow.${var.private_domain}"
+#   ingress_class     = "alb"
+#
+#   # Resources
+#   resources = {
+#     limits   = { cpu = "1000m", memory = "2Gi" }
+#     requests = { cpu = "500m", memory = "1Gi" }
+#   }
+#
+#   # Autoscaling
+#   enable_autoscaling = true
+#   min_replicas       = 2
+#   max_replicas       = 5
+#   target_cpu_percent = 70
+#
+#   providers = {
+#     kubernetes = kubernetes.hub
+#     helm       = helm.hub
+#   }
+#
+#   tags = local.common_tags
+# }
+
+# =============================================================================
+# Usage Notes
+# =============================================================================
+#
+# 1. Rename this file to optional-modules.tf when ready to use
+# 2. Uncomment the module(s) you want to enable
+# 3. Update variables and configuration as needed
+# 4. Run: terraform init && terraform plan
+# 5. Verify changes before apply
+#
+# For detailed use cases and cost analysis, see:
+# docs/STACK_OPTIMIZATION_2026-01.md
+#

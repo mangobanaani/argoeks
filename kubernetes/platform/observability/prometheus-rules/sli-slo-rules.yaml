@@ -1,0 +1,133 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sli-slo-rules
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+spec:
+  groups:
+  # API Availability SLI
+  - name: sli.api.availability
+    interval: 30s
+    rules:
+    - record: sli:api:availability:ratio_rate5m
+      expr: |
+        sum(rate(http_requests_total{code!~"5.."}[5m]))
+        /
+        sum(rate(http_requests_total[5m]))
+
+    - record: sli:api:availability:ratio_rate1h
+      expr: |
+        sum(rate(http_requests_total{code!~"5.."}[1h]))
+        /
+        sum(rate(http_requests_total[1h]))
+
+    - alert: SLOAvailabilityBreach
+      expr: sli:api:availability:ratio_rate5m < 0.99
+      for: 5m
+      labels:
+        severity: warning
+        slo: availability
+      annotations:
+        summary: "API availability below 99% SLO"
+        description: "Current availability: {{ $value | humanizePercentage }}"
+
+  # API Latency SLI
+  - name: sli.api.latency
+    interval: 30s
+    rules:
+    - record: sli:api:latency:p95
+      expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+    - record: sli:api:latency:p99
+      expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+    - alert: SLOLatencyBreach
+      expr: sli:api:latency:p95 > 1.0
+      for: 10m
+      labels:
+        severity: warning
+        slo: latency
+      annotations:
+        summary: "API P95 latency above 1s SLO"
+        description: "Current P95 latency: {{ $value }}s"
+
+  # Error Budget
+  - name: sli.error.budget
+    interval: 1m
+    rules:
+    - record: sli:error_budget:remaining_ratio
+      expr: |
+        1 - (
+          (1 - sli:api:availability:ratio_rate1h)
+          /
+          (1 - 0.99)
+        )
+
+    - alert: ErrorBudgetLow
+      expr: sli:error_budget:remaining_ratio < 0.1
+      for: 5m
+      labels:
+        severity: critical
+        slo: error-budget
+      annotations:
+        summary: "Error budget critically low"
+        description: "Only {{ $value | humanizePercentage }} of error budget remaining"
+
+  # ArgoCD SLI
+  - name: sli.argocd.sync
+    interval: 1m
+    rules:
+    - record: sli:argocd:sync_success_rate
+      expr: |
+        sum(rate(argocd_app_sync_total{phase="Succeeded"}[5m]))
+        /
+        sum(rate(argocd_app_sync_total[5m]))
+
+    - alert: ArgoCDSyncFailureRate
+      expr: sli:argocd:sync_success_rate < 0.95
+      for: 10m
+      labels:
+        severity: warning
+        component: argocd
+      annotations:
+        summary: "ArgoCD sync success rate below 95%"
+        description: "Current success rate: {{ $value | humanizePercentage }}"
+
+  # Cilium SLI
+  - name: sli.cilium.connectivity
+    interval: 30s
+    rules:
+    - record: sli:cilium:endpoint_health_rate
+      expr: |
+        sum(cilium_endpoint_state{endpoint_state="ready"})
+        /
+        sum(cilium_endpoint_state)
+
+    - alert: CiliumEndpointHealth
+      expr: sli:cilium:endpoint_health_rate < 0.98
+      for: 5m
+      labels:
+        severity: critical
+        component: cilium
+      annotations:
+        summary: "Cilium endpoint health degraded"
+        description: "{{ $value | humanizePercentage }} endpoints ready"
+
+  # Karpenter SLI
+  - name: sli.karpenter.provisioning
+    interval: 1m
+    rules:
+    - record: sli:karpenter:provisioning_duration_p95
+      expr: histogram_quantile(0.95, sum(rate(karpenter_provisioner_scheduling_duration_seconds_bucket[5m])) by (le))
+
+    - alert: KarpenterSlowProvisioning
+      expr: sli:karpenter:provisioning_duration_p95 > 300
+      for: 10m
+      labels:
+        severity: warning
+        component: karpenter
+      annotations:
+        summary: "Karpenter provisioning slow"
+        description: "P95 provisioning time: {{ $value }}s"

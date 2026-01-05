@@ -1,0 +1,42 @@
+# Credentials and secrets
+.env
+.env.local
+*.tfvars
+!*.tfvars.example
+terraform.tfvars
+*.pem
+*.key
+*.crt
+*.p12
+credentials.json
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.tfstate.lock.info
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+__pycache__/
+.pytest_cache/

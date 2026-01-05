@@ -1,0 +1,400 @@
+stages:
+  - validate
+  - scan
+  - plan
+  - deploy
+  - verify
+  - cleanup
+
+variables:
+  TF_VERSION: "1.7.5"
+  TF_ROOT: "terraform"
+  AWS_REGION: "us-east-1"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+default:
+  retry:
+    max: 2
+    when: [runner_system_failure, stuck_or_timeout_failure]
+
+include:
+  - local: .gitlab/ci/terraform.yml
+  - local: .gitlab/ci/security.yml
+  - local: .gitlab/ci/containers.yml
+  - local: .gitlab/ci/kubernetes.yml
+
+.oidc_role_setup: &oidc_role_setup |
+  apt-get update -qq && apt-get install -y -qq jq awscli >/dev/null
+  CREDS=$(aws sts assume-role-with-web-identity \
+    --role-arn "$AWS_ROLE_ARN" \
+    --role-session-name "gitlab-${CI_JOB_ID}" \
+    --web-identity-token "$CI_JOB_JWT_V2" \
+    --duration-seconds 3600)
+  export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .Credentials.AccessKeyId)
+  export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .Credentials.SecretAccessKey)
+  export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .Credentials.SessionToken)
+  export AWS_DEFAULT_REGION=$AWS_REGION
+
+.terraform_image: &terraform_image
+  image: hashicorp/terraform:${TF_VERSION}
+  before_script:
+    - cd $TF_ROOT
+
+# ============================================================================
+# Validation Stage
+# ============================================================================
+
+validate:format:
+  stage: validate
+  <<: *terraform_image
+  script:
+    - terraform fmt -check -recursive
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+
+validate:terraform:
+  stage: validate
+  <<: *terraform_image
+  parallel:
+    matrix:
+      - ENVIRONMENT: dev
+      - ENVIRONMENT: qa
+      - ENVIRONMENT: prod
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/$ENVIRONMENT"
+  script:
+    - terraform init -input=false -backend=false
+    - terraform validate -no-color
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+
+validate:kubernetes:
+  stage: validate
+  image: ghcr.io/yannh/kubeconform:latest
+  script:
+    - |
+      kubeconform -summary -strict -ignore-missing-schemas \
+        -kubernetes-version 1.28.0 \
+        kubernetes/**/*.yaml platform/**/*.yaml || true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+      changes:
+        - kubernetes/**/*.{yaml,yml}
+        - platform/**/*.{yaml,yml}
+
+validate:python:
+  stage: validate
+  image: python:3.11
+  script:
+    - pip install -r requirements-dev.txt
+    - python -m pytest automation/scripts/tests -v --tb=short
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+      changes:
+        - automation/scripts/**
+        - requirements-dev.txt
+
+# ============================================================================
+# Security Scanning Stage
+# ============================================================================
+
+scan:tfsec:
+  stage: scan
+  image: aquasec/tfsec:latest
+  script:
+    - tfsec $TF_ROOT --format sarif --out tfsec-results.sarif || true
+  artifacts:
+    reports:
+      sast: tfsec-results.sarif
+    paths:
+      - tfsec-results.sarif
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+
+scan:checkov:
+  stage: scan
+  image: bridgecrewio/checkov:latest
+  script:
+    - |
+      checkov --directory $TF_ROOT \
+        --framework terraform \
+        --output sarif \
+        --output-file checkov-results.sarif || true
+  artifacts:
+    reports:
+      sast: checkov-results.sarif
+    paths:
+      - checkov-results.sarif
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+
+scan:kubernetes:
+  stage: scan
+  image: openpolicyagent/conftest:latest
+  script:
+    - |
+      conftest test --policy policies/kubernetes \
+        kubernetes/**/*.yaml platform/**/*.yaml || true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+      changes:
+        - kubernetes/**/*.{yaml,yml}
+        - platform/**/*.{yaml,yml}
+
+scan:kube-bench:
+  stage: scan
+  image: aquasec/kube-bench:latest
+  script:
+    - kube-bench run --targets node,policies --json > kube-bench-results.json || true
+  artifacts:
+    paths:
+      - kube-bench-results.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH == "main"
+
+# ============================================================================
+# Plan Stage
+# ============================================================================
+
+plan:sandbox:
+  stage: plan
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/sandbox"
+  script:
+    - terraform init -input=false
+    - terraform plan -input=false -out=plan.tfplan \
+        -var="region=$AWS_REGION" \
+        -var="cluster_count=1" \
+        -var="name_prefix=sbx-mr-${CI_MERGE_REQUEST_IID}"
+    - terraform show -no-color plan.tfplan
+  artifacts:
+    paths:
+      - "$TF_ROOT/environments/sandbox/plan.tfplan"
+    expire_in: 5 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+plan:dev:
+  stage: plan
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/dev"
+  script:
+    - terraform init -input=false
+    - terraform plan -input=false -out=plan.tfplan -var="region=$AWS_REGION"
+    - terraform show -no-color plan.tfplan
+  artifacts:
+    paths:
+      - "$TF_ROOT/environments/dev/plan.tfplan"
+    expire_in: 5 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+plan:qa:
+  stage: plan
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/qa"
+  script:
+    - terraform init -input=false
+    - terraform plan -input=false -out=plan.tfplan -var="region=$AWS_REGION"
+    - terraform show -no-color plan.tfplan
+  artifacts:
+    paths:
+      - "$TF_ROOT/environments/qa/plan.tfplan"
+    expire_in: 5 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ============================================================================
+# Deploy Stage
+# ============================================================================
+
+deploy:sandbox:
+  stage: deploy
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/sandbox"
+  script:
+    - terraform init -input=false
+    - terraform apply -input=false -auto-approve \
+        -var="region=$AWS_REGION" \
+        -var="cluster_count=1" \
+        -var="name_prefix=sbx-mr-${CI_MERGE_REQUEST_IID}"
+  environment:
+    name: sandbox/mr-$CI_MERGE_REQUEST_IID
+    kubernetes:
+      namespace: kube-system
+    on_stop: destroy:sandbox
+    auto_stop_in: 2 weeks
+  needs:
+    - plan:sandbox
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+
+deploy:dev:
+  stage: deploy
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/dev"
+  script:
+    - terraform init -input=false -lock=true -lock-timeout=10m
+    - terraform apply -input=false -auto-approve plan.tfplan
+  environment:
+    name: development
+    kubernetes:
+      namespace: kube-system
+    url: https://dev.argoeks.example.com
+  needs:
+    - plan:dev
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: manual
+
+deploy:qa:
+  stage: deploy
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/qa"
+  script:
+    - terraform init -input=false -lock=true -lock-timeout=10m
+    - terraform apply -input=false -auto-approve plan.tfplan
+  environment:
+    name: staging
+    kubernetes:
+      namespace: kube-system
+    url: https://qa.argoeks.example.com
+  needs:
+    - plan:qa
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+
+deploy:prod:
+  stage: deploy
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/prod"
+  script:
+    - terraform init -input=false -lock=true -lock-timeout=10m
+    - terraform plan -input=false -out=plan.tfplan -var="region=$AWS_REGION"
+    - terraform apply -input=false -auto-approve plan.tfplan
+  environment:
+    name: production
+    kubernetes:
+      namespace: kube-system
+    url: https://argoeks.example.com
+  needs: []
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+
+# ============================================================================
+# Verification Stage
+# ============================================================================
+
+verify:health-check:
+  stage: verify
+  image: curlimages/curl:latest
+  script:
+    - |
+      for env in dev qa; do
+        echo "Checking health of $env environment..."
+        curl -f https://$env.argoeks.example.com/health || true
+      done
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_JOB_STAGE == "verify"
+      when: on_success
+
+verify:argocd:
+  stage: verify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      echo "Verifying ArgoCD Application sync status..."
+      # This would connect to ArgoCD API and verify app sync status
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: on_success
+
+# ============================================================================
+# Cleanup Stage
+# ============================================================================
+
+destroy:sandbox:
+  stage: cleanup
+  <<: *terraform_image
+  id_tokens:
+    OIDC_TOKEN:
+      aud: https://gitlab.com
+  variables:
+    AWS_ROLE_ARN: $AWS_ROLE_ARN
+  before_script:
+    - *oidc_role_setup
+    - cd "$TF_ROOT/environments/sandbox"
+  script:
+    - terraform init -input=false
+    - terraform destroy -auto-approve -input=false \
+        -var="region=$AWS_REGION" \
+        -var="cluster_count=1" \
+        -var="name_prefix=sbx-mr-${CI_MERGE_REQUEST_IID}"
+  environment:
+    name: sandbox/mr-$CI_MERGE_REQUEST_IID
+    action: stop
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual

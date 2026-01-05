@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: karpenter-autoscaler
+  namespace: argocd
+spec:
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: "{{name}}-karpenter"
+      labels:
+        cluster: "{{name}}"
+        app.kubernetes.io/component: autoscaling
+    spec:
+      project: default
+      sources:
+        - repoURL: oci://public.ecr.aws/karpenter
+          chart: karpenter
+          targetRevision: 1.1.1
+          helm:
+            releaseName: karpenter
+            valuesObject:
+              replicas: 2
+              serviceAccount:
+                create: true
+                name: karpenter
+                annotations:
+                  eks.amazonaws.com/role-arn: "{{metadata.annotations.karpenter_role_arn}}"
+              settings:
+                clusterName: "{{name}}"
+                clusterEndpoint: "{{server}}"
+                interruptionQueue: "{{name}}-karpenter"
+              controller:
+                resources:
+                  requests:
+                    cpu: 200m
+                    memory: 256Mi
+                  limits:
+                    cpu: 1000m
+                    memory: 1Gi
+        - repoURL: https://example.com/gitops-repo.git
+          targetRevision: main
+          path: platform/karpenter
+      destination:
+        server: "{{server}}"
+        namespace: karpenter
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m

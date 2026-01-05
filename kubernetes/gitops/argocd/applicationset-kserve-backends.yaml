@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: kserve-backends-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            kserve: "enabled"
+  template:
+    metadata:
+      name: "{{name}}-kserve-backends"
+    spec:
+      project: platform
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/kserve/backends/overlays/{{metadata.labels.environment}}
+      destination:
+        server: "{{server}}"
+        namespace: kserve
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: ["CreateNamespace=true"]
+

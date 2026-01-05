@@ -1,0 +1,165 @@
+# KEDA ScaledObject Examples
+# Event-driven autoscaling based on external metrics
+
+---
+# Scale based on SQS queue depth
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sqs-queue-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: queue-processor
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 20
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+  - type: aws-sqs-queue
+    metadata:
+      queueURL: https://sqs.us-east-1.amazonaws.com/123456789012/my-queue
+      queueLength: "5"
+      awsRegion: us-east-1
+      identityOwner: operator  # Use IRSA
+
+---
+# Scale based on Prometheus metrics
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: prometheus-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: metrics-processor
+    kind: Deployment
+  minReplicaCount: 2
+  maxReplicaCount: 30
+  pollingInterval: 15
+  cooldownPeriod: 180
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-server.monitoring.svc.cluster.local:9090
+      metricName: http_requests_total
+      query: sum(rate(http_requests_total{job="api"}[2m]))
+      threshold: "1000"
+
+---
+# Scale based on Kafka consumer lag
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kafka-consumer-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: kafka-consumer
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 50
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-broker.kafka.svc.cluster.local:9092
+      consumerGroup: my-consumer-group
+      topic: events
+      lagThreshold: "100"
+
+---
+# Scale based on CloudWatch metrics
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: cloudwatch-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: cloudwatch-processor
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 60
+  cooldownPeriod: 300
+  triggers:
+  - type: aws-cloudwatch
+    metadata:
+      namespace: AWS/ApplicationELB
+      dimensionName: LoadBalancer
+      dimensionValue: app/my-load-balancer/50dc6c495c0c9188
+      metricName: ActiveConnectionCount
+      targetMetricValue: "1000"
+      minMetricValue: "0"
+      awsRegion: us-east-1
+      identityOwner: operator  # Use IRSA
+
+---
+# Scale based on DynamoDB stream
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dynamodb-stream-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: dynamodb-processor
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 25
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+  - type: aws-dynamodb-streams
+    metadata:
+      tableName: MyTable
+      shardCount: "2"
+      awsRegion: us-east-1
+      identityOwner: operator  # Use IRSA
+
+---
+# Scale based on Kinesis stream
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kinesis-stream-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: kinesis-consumer
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 15
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+  - type: aws-kinesis-stream
+    metadata:
+      streamName: my-stream
+      shardCount: "2"
+      awsRegion: us-east-1
+      identityOwner: operator  # Use IRSA
+
+---
+# Cron-based scaling for predictable workloads
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: cron-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    name: batch-processor
+    kind: Deployment
+  minReplicaCount: 1
+  maxReplicaCount: 1
+  triggers:
+  - type: cron
+    metadata:
+      timezone: America/New_York
+      start: 0 8 * * 1-5      # 8 AM on weekdays
+      end: 0 18 * * 1-5        # 6 PM on weekdays
+      desiredReplicas: "10"

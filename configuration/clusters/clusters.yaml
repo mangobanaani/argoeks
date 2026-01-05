@@ -1,0 +1,22 @@
+# Single source of truth for 1..50 clusters
+apiVersion: platform.example.io/v1alpha1
+kind: ClusterRegistry
+metadata:
+  name: mlops-fleet
+spec:
+  clusters:
+    - name: mlops-cluster-01
+      region: us-east-1
+      labels:
+        cluster-type: mlops
+        tenancy: team-a
+        compliance: soc2
+        hub: "true"
+    - name: mlops-cluster-02
+      region: us-east-1
+      labels:
+        cluster-type: mlops
+        tenancy: team-b
+        compliance: soc2
+    # Add up to mlops-cluster-50 as needed
+

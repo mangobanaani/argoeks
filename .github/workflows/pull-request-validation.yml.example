@@ -1,0 +1,279 @@
+name: Pull Request Validation
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - terraform/**
+      - kubernetes/**
+      - gitops/**
+      - scripts/**
+      - build/**
+      - .github/workflows/**
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TERRAFORM_VERSION: "1.7.5"
+  AWS_REGION: us-east-1
+  INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      pr-number: ${{ github.event.pull_request.number }}
+      pr-title: ${{ github.event.pull_request.title }}
+      pr-author: ${{ github.event.pull_request.user.login }}
+      changed-files: ${{ steps.files.outputs.all_changed_files }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: files
+        uses: tj-actions/changed-files@v42
+        with:
+          files: |
+            terraform/**
+            kubernetes/**
+            gitops/**
+
+  lint-terraform:
+    runs-on: ubuntu-latest
+    name: Lint Terraform Code
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: ./.github/actions/terraform-setup
+        with:
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
+          working-directory: terraform
+
+      - name: Terraform format check
+        working-directory: terraform
+        run: |
+          echo "Checking Terraform formatting..."
+          terraform fmt -recursive -check
+
+      - name: TFLint setup and run
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.52.0
+
+      - name: Run TFLint
+        working-directory: terraform
+        run: |
+          tflint --init
+          tflint --recursive --format sarif --out tflint-results.sarif || true
+
+      - name: Upload TFLint results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: terraform/tflint-results.sarif
+          category: tflint
+        continue-on-error: true
+
+  validate-terraform:
+    runs-on: ubuntu-latest
+    name: Validate Terraform
+    needs: [lint-terraform]
+    strategy:
+      matrix:
+        environment: [dev, qa, prod]
+        fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: ./.github/actions/terraform-setup
+        with:
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
+          working-directory: terraform/environments/${{ matrix.environment }}
+
+      - name: Initialize Terraform (${{ matrix.environment }})
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform init -backend=false -input=false
+
+      - name: Validate Terraform (${{ matrix.environment }})
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform validate -no-color
+
+  terraform-security-scan:
+    runs-on: ubuntu-latest
+    name: Terraform Security Scan
+    needs: [lint-terraform]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run security scans
+        uses: ./.github/actions/terraform-security-scan
+        with:
+          terraform-directory: terraform
+          severity-level: MEDIUM
+          infracost-api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate cost estimate report
+        if: always()
+        run: |
+          if [ -f infracost-breakdown.json ]; then
+            echo "### Infracost Estimate" >> $GITHUB_STEP_SUMMARY
+            cat infracost-breakdown.json | jq '.' >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+
+  lint-kubernetes:
+    runs-on: ubuntu-latest
+    name: Validate Kubernetes Manifests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifests
+        uses: ./.github/actions/kubernetes-validate
+        with:
+          manifests-path: kubernetes
+          kubernetes-version: '1.28.0'
+          strict-mode: 'true'
+
+      - name: Check Kubernetes manifest policies
+        run: |
+          docker run --rm -v "$(pwd):/workspace" \
+            openpolicyagent/conftest:latest \
+            test --policy policies/kubernetes \
+            kubernetes/**/*.{yaml,yml} 2>/dev/null || true
+        continue-on-error: true
+
+  test-scripts:
+    runs-on: ubuntu-latest
+    name: Test Python Scripts
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: |
+          python -m pytest automation/scripts/tests -v --tb=short
+
+      - name: Generate coverage report
+        run: |
+          python -m pytest automation/scripts/tests --cov=automation/scripts --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: scripts
+        continue-on-error: true
+
+  plan-environments:
+    runs-on: ubuntu-latest
+    name: Terraform Plan (${{ matrix.environment }})
+    needs: [validate-terraform, terraform-security-scan]
+    strategy:
+      matrix:
+        environment: [dev, qa]
+      fail-fast: false
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: ./.github/actions/terraform-setup
+        with:
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
+          working-directory: terraform/environments/${{ matrix.environment }}
+
+      - name: Setup AWS credentials
+        uses: ./.github/actions/setup-aws-credentials
+        with:
+          role-arn: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initialize Terraform
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform init -input=false
+
+      - name: Run Terraform plan
+        uses: ./.github/actions/terraform-plan
+        with:
+          working-directory: terraform/environments/${{ matrix.environment }}
+          artifact-name: tfplan-${{ matrix.environment }}
+
+      - name: Comment plan on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planFile = 'terraform/environments/${{ matrix.environment }}/plan.txt';
+
+            if (fs.existsSync(planFile)) {
+              const plan = fs.readFileSync(planFile, 'utf8');
+              const comment = `### Terraform Plan - ${{ matrix.environment }}
+
+              \`\`\`
+              ${plan.substring(0, 3000)}
+              \`\`\`
+              `;
+
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+        continue-on-error: true
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    name: Quality Gate
+    needs: [lint-terraform, validate-terraform, terraform-security-scan, lint-kubernetes, test-scripts]
+    if: always()
+    steps:
+      - name: Evaluate quality gates
+        run: |
+          if [ "${{ needs.lint-terraform.result }}" = "failure" ] || \
+             [ "${{ needs.validate-terraform.result }}" = "failure" ] || \
+             [ "${{ needs.test-scripts.result }}" = "failure" ]; then
+            echo "Quality gate failed"
+            exit 1
+          fi
+
+      - name: Add success label
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ['ready-for-review']
+            });
+        continue-on-error: true

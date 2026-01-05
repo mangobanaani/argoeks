@@ -1,0 +1,158 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-rules
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+  - name: argocd-slo
+    interval: 30s
+    rules:
+    # ArgoCD API Availability SLO (99.5% over 30 days)
+    - record: argocd:api:availability:ratio_rate5m
+      expr: |
+        (
+          sum(rate(argocd_server_request_count{code!~"5.."}[5m]))
+          /
+          sum(rate(argocd_server_request_count[5m]))
+        )
+
+    - record: argocd:api:availability:burnrate1h
+      expr: |
+        (
+          1 - (
+            sum(rate(argocd_server_request_count{code!~"5.."}[1h]))
+            /
+            sum(rate(argocd_server_request_count[1h]))
+          )
+        ) / (1 - 0.995)
+
+    - record: argocd:api:availability:burnrate6h
+      expr: |
+        (
+          1 - (
+            sum(rate(argocd_server_request_count{code!~"5.."}[6h]))
+            /
+            sum(rate(argocd_server_request_count[6h]))
+          )
+        ) / (1 - 0.995)
+
+    # ArgoCD Sync Performance SLO (95% under 60s)
+    - record: argocd:sync:latency:ratio_rate5m
+      expr: |
+        (
+          sum(rate(argocd_app_sync_duration_seconds_bucket{le="60"}[5m]))
+          /
+          sum(rate(argocd_app_sync_duration_seconds_count[5m]))
+        )
+
+    # Sync success rate SLO (99% successful)
+    - record: argocd:sync:success:ratio_rate5m
+      expr: |
+        (
+          sum(rate(argocd_app_sync_total{phase="Succeeded"}[5m]))
+          /
+          sum(rate(argocd_app_sync_total[5m]))
+        )
+
+  - name: cluster-slo
+    interval: 30s
+    rules:
+    # API Server Availability SLO (99.9%)
+    - record: apiserver:availability:ratio_rate5m
+      expr: |
+        (
+          sum(rate(apiserver_request_total{code!~"5.."}[5m]))
+          /
+          sum(rate(apiserver_request_total[5m]))
+        )
+
+    # API Server Latency SLO (99% under 1s)
+    - record: apiserver:latency:ratio_rate5m
+      expr: |
+        (
+          sum(rate(apiserver_request_duration_seconds_bucket{le="1",verb!="WATCH"}[5m]))
+          /
+          sum(rate(apiserver_request_duration_seconds_count{verb!="WATCH"}[5m]))
+        )
+
+    # Pod readiness SLO (95% pods ready within 5min)
+    - record: cluster:pod_readiness:ratio
+      expr: |
+        (
+          count(kube_pod_status_ready{condition="true"})
+          /
+          count(kube_pod_status_ready)
+        )
+
+  - name: slo-alerts
+    interval: 30s
+    rules:
+    # Fast burn: 2% error budget consumed in 1h
+    - alert: ArgoCD_API_ErrorBudgetBurn_Fast
+      expr: |
+        argocd:api:availability:burnrate1h > 14.4
+        and
+        argocd:api:availability:burnrate6h > 14.4
+      for: 2m
+      labels:
+        severity: critical
+        slo: argocd-api-availability
+      annotations:
+        summary: "ArgoCD API availability SLO at risk (fast burn)"
+        description: "ArgoCD API error budget burning too fast. Current burn rate: {{ $value | humanize }}x"
+
+    # Slow burn: 10% error budget consumed in 6h
+    - alert: ArgoCD_API_ErrorBudgetBurn_Slow
+      expr: |
+        argocd:api:availability:burnrate6h > 2
+      for: 15m
+      labels:
+        severity: warning
+        slo: argocd-api-availability
+      annotations:
+        summary: "ArgoCD API availability SLO degrading (slow burn)"
+        description: "ArgoCD API error budget burning slowly. Current burn rate: {{ $value | humanize }}x"
+
+    - alert: ArgoCD_Sync_Latency_SLO_Breach
+      expr: argocd:sync:latency:ratio_rate5m < 0.95
+      for: 5m
+      labels:
+        severity: warning
+        slo: argocd-sync-latency
+      annotations:
+        summary: "ArgoCD sync latency SLO breached"
+        description: "Only {{ $value | humanizePercentage }} of syncs completing under 60s (target: 95%)"
+
+    - alert: ArgoCD_Sync_Success_SLO_Breach
+      expr: argocd:sync:success:ratio_rate5m < 0.99
+      for: 5m
+      labels:
+        severity: critical
+        slo: argocd-sync-success
+      annotations:
+        summary: "ArgoCD sync success rate SLO breached"
+        description: "Only {{ $value | humanizePercentage }} of syncs succeeding (target: 99%)"
+
+    - alert: APIServer_Availability_SLO_Breach
+      expr: apiserver:availability:ratio_rate5m < 0.999
+      for: 2m
+      labels:
+        severity: critical
+        slo: apiserver-availability
+      annotations:
+        summary: "Kubernetes API server availability SLO breached"
+        description: "API server availability: {{ $value | humanizePercentage }} (target: 99.9%)"
+
+    - alert: APIServer_Latency_SLO_Breach
+      expr: apiserver:latency:ratio_rate5m < 0.99
+      for: 5m
+      labels:
+        severity: warning
+        slo: apiserver-latency
+      annotations:
+        summary: "Kubernetes API server latency SLO breached"
+        description: "Only {{ $value | humanizePercentage }} of requests under 1s (target: 99%)"

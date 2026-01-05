@@ -1,0 +1,77 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: general
+spec:
+  # Template for nodes created by this pool
+  template:
+    metadata:
+      labels:
+        cni: cilium
+        node-type: general
+        workload-class: general-purpose
+
+    spec:
+      # Reference to EC2NodeClass
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+
+      # Requirements constrain what instances can be used
+      requirements:
+        # Architecture
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64", "arm64"]
+
+        # Capacity type - prefer spot for cost savings
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+
+        # Instance categories - general purpose compute
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["m", "c", "r"]
+
+        # Generation - only recent generations
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["5"]
+
+        # Instance sizes - exclude nano/micro/small for stability
+        - key: karpenter.k8s.aws/instance-size
+          operator: NotIn
+          values: ["nano", "micro", "small"]
+
+      # Startup taints - removed once node is ready
+      # Prevents scheduling before Cilium is fully initialized
+      startupTaints:
+        - key: node.cilium.io/agent-not-ready
+          effect: NoExecute
+          value: "true"
+
+  # Resource limits for this pool
+  limits:
+    cpu: "2000"
+    memory: 4000Gi
+
+  # Weight for prioritization (higher = preferred)
+  weight: 50
+
+  # Disruption controls for node consolidation and termination
+  disruption:
+    # Consolidation policy
+    consolidationPolicy: WhenEmptyOrUnderutilized
+
+    # Wait time before consolidating empty nodes
+    consolidateAfter: 5m
+
+    # Budget for disruptions
+    budgets:
+      - nodes: "10%"
+        duration: 10m
+      - nodes: "0"
+        schedule: "0 0 * * *"  # No disruptions during daily backup window
+        duration: 2h

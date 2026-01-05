@@ -1,0 +1,52 @@
+# Standard cost allocation and compliance tags for all environments
+# These tags are automatically applied to all AWS resources
+
+common:
+  Application: argoeks
+  ManagedBy: Terraform
+  GitRepo: github.com/yourorg/argoeks
+  Owner: platform-team
+  CostCenter: engineering
+
+environments:
+  dev:
+    Environment: dev
+    CostCenter: engineering
+    DataClassification: internal
+    BackupPolicy: daily
+    ComplianceRequirements: none
+    BillingProject: dev-mlops
+
+  qa:
+    Environment: qa
+    CostCenter: engineering
+    DataClassification: internal
+    BackupPolicy: daily
+    ComplianceRequirements: none
+    BillingProject: qa-mlops
+
+  prod:
+    Environment: prod
+    CostCenter: production
+    DataClassification: confidential
+    BackupPolicy: multi-region-replicated
+    ComplianceRequirements: SOC2,PCI-DSS
+    BillingProject: prod-mlops
+
+# Resource-specific tag requirements
+resource_tags:
+  eks_cluster:
+    - kubernetes.io/cluster/CLUSTER_NAME
+    - karpenter.sh/discovery
+
+  karpenter_nodes:
+    - karpenter.sh/discovery
+    - karpenter.sh/nodepool
+
+  backup_resources:
+    - velero.io/backup
+    - velero.io/schedule
+
+  observability:
+    - monitoring/prometheus
+    - monitoring/grafana

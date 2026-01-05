@@ -1,0 +1,74 @@
+name: Terraform Plan
+description: Run Terraform plan and save output as artifact
+
+inputs:
+  working-directory:
+    description: Working directory for Terraform
+    required: true
+  terraform-vars:
+    description: JSON string of Terraform variables
+    required: false
+  var-file:
+    description: Path to Terraform var file
+    required: false
+  artifact-name:
+    description: Name for plan artifact
+    required: false
+    default: tfplan
+
+outputs:
+  plan-output:
+    description: Terraform plan output
+    value: ${{ steps.plan.outputs.stdout }}
+  plan-has-changes:
+    description: Whether plan has changes
+    value: ${{ steps.plan-check.outputs.has_changes }}
+
+runs:
+  using: composite
+  steps:
+    - name: Terraform plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        PLAN_ARGS="-input=false -no-color"
+
+        # Add var file if provided
+        if [ -n "${{ inputs.var-file }}" ]; then
+          PLAN_ARGS="$PLAN_ARGS -var-file=${{ inputs.var-file }}"
+        fi
+
+        # Add variables if provided
+        if [ -n "${{ inputs.terraform-vars }}" ]; then
+          VARS='${{ inputs.terraform-vars }}'
+          echo "$VARS" | jq -r 'to_entries[] | "-var=\(.key)=\(.value)"' | xargs -I {} terraform plan {} $PLAN_ARGS -out=plan.tfplan 2>&1 || true
+        else
+          terraform plan $PLAN_ARGS -out=plan.tfplan 2>&1 || true
+        fi
+
+        # Capture plan output
+        terraform show -no-color plan.tfplan > plan.txt
+        {
+          echo 'stdout<<EOF'
+          cat plan.txt
+          echo 'EOF'
+        } >> $GITHUB_OUTPUT
+
+    - name: Check for changes
+      id: plan-check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if grep -q "No changes. Infrastructure is up-to-date" plan.txt; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Upload plan artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/plan.tfplan
+        retention-days: 5

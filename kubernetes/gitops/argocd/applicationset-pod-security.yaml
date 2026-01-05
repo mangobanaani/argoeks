@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: pod-security-standards
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: dev-mlops-cluster-01
+        url: https://kubernetes.default.svc
+  template:
+    metadata:
+      name: '{{cluster}}-pod-security'
+      annotations:
+        argocd.argoproj.io/manifest-generate-paths: /kubernetes/platform/pod-security
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/your-org/argoeks.git
+        targetRevision: HEAD
+        path: kubernetes/platform/pod-security
+      destination:
+        server: '{{url}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=false  # Namespaces should already exist
+        - ServerSideApply=true   # Required for namespace label updates

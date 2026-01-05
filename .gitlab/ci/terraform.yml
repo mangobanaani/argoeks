@@ -1,0 +1,71 @@
+# GitLab CI Terraform configuration templates
+# Included in main .gitlab-ci.yml
+
+.terraform_lint:
+  stage: validate
+  image: hashicorp/terraform:${TF_VERSION}
+  script:
+    - cd $TF_ROOT
+    - terraform fmt -check -recursive
+    - echo "Terraform format validation passed"
+  allow_failure: false
+
+.terraform_validate:
+  stage: validate
+  image: hashicorp/terraform:${TF_VERSION}
+  script:
+    - cd $TF_ROOT/environments/$ENVIRONMENT
+    - terraform init -input=false -backend=false
+    - terraform validate -no-color
+  allow_failure: false
+
+.terraform_cost_estimation:
+  stage: plan
+  script:
+    - |
+      if command -v infracost &> /dev/null; then
+        echo "Running Infracost analysis..."
+        cd $TF_ROOT/environments/$ENVIRONMENT
+        infracost breakdown --path . --format json
+      else
+        echo "Infracost not available"
+      fi
+  allow_failure: true
+  artifacts:
+    paths:
+      - infracost-*.json
+    expire_in: 30 days
+
+.terraform_lock_and_backup:
+  before_script:
+    - |
+      cd $TF_ROOT/environments/$ENVIRONMENT
+      # Create backup of current state
+      if [ -f terraform.tfstate ]; then
+        cp terraform.tfstate terraform.tfstate.backup.$(date +%s)
+      fi
+      # Ensure state locking is enabled
+      export TF_LOCK_TIMEOUT=10m
+
+.terraform_auto_approve_safety:
+  script:
+    - |
+      # Safety checks before auto-approve
+      echo "Running pre-deployment safety checks..."
+
+      # Check for dangerous operations
+      if terraform plan -input=false -out=plan.tfplan 2>&1 | grep -i "will be destroyed"; then
+        echo "WARNING: Destruction detected in plan"
+        if [ "$ALLOW_DESTROY" != "true" ]; then
+          echo "ERROR: Destroy operation not allowed in this pipeline"
+          exit 1
+        fi
+      fi
+
+      # Verify lock file exists
+      if [ ! -f .terraform.lock.hcl ]; then
+        echo "ERROR: .terraform.lock.hcl not found"
+        exit 1
+      fi
+
+      echo "Safety checks passed"

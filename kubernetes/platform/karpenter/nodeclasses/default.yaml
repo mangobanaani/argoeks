@@ -1,0 +1,70 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  amiSelectorTerms:
+    - alias: al2023@latest
+
+  # IAM role created by Terraform module
+  role: "CLUSTER_NAME-karpenter-node"
+
+  # Subnet discovery via tags
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "CLUSTER_NAME"
+
+  # Security group discovery via tags
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "CLUSTER_NAME"
+
+  # Block device configuration
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        iops: 3000
+        throughput: 125
+        encrypted: true
+        deleteOnTermination: true
+
+  # Instance metadata configuration (required for Cilium ENI mode)
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required
+
+  # User data for Cilium compatibility
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    set -ex
+
+    # Ensure Cilium CNI is ready before kubelet starts
+    # This prevents pods from being scheduled before CNI is available
+    echo "Waiting for Cilium CNI to be ready..."
+
+    # Tag instance for tracking
+    EC2_INSTANCE_ID=$(ec2-metadata --instance-id | cut -d " " -f 2)
+    EC2_REGION=$(ec2-metadata --availability-zone | cut -d " " -f 2 | sed 's/[a-z]$//')
+
+    aws ec2 create-tags \
+      --resources ${EC2_INSTANCE_ID} \
+      --tags Key=cni,Value=cilium \
+      --region ${EC2_REGION}
+
+    --BOUNDARY--
+
+  # Tags applied to all instances
+  tags:
+    cni: cilium
+    managed-by: karpenter
+    node-lifecycle: spot-preferred

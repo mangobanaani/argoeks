@@ -1,0 +1,18 @@
+apiVersion: platform.example.io/v1alpha1
+kind: ClusterRegistry
+metadata:
+  name: mlops-fleet-qa
+spec:
+  clusters:
+    - name: qa-mlops-cluster-01
+      region: us-east-1
+      labels:
+        cluster-type: mlops
+        environment: qa
+        hub: "true"
+    - name: qa-mlops-cluster-02
+      region: us-east-1
+      labels:
+        cluster-type: mlops
+        environment: qa
+

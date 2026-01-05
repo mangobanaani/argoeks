@@ -1,0 +1,19 @@
+# ecr_scanning
+
+Configures ECR image scanning on push with scan findings reporting for vulnerability detection.
+
+## Usage
+
+
+
+## Inputs
+
+- See . Consider running terraform-docs to render detailed inputs/outputs.
+
+## Outputs
+
+- See .
+
+## Notes
+
+- This README was generated as part of the standardization effort on 2026-01-01.

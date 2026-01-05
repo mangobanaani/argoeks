@@ -1,0 +1,282 @@
+# Cilium CNI Configuration for MLOps
+# This file contains base values for Cilium deployment
+# Environment-specific overrides are in config/platform.yaml
+
+# eBPF native routing for maximum performance
+routingMode: native
+
+# AWS ENI mode for IP address management (keeps AWS VPC integration)
+eni:
+  enabled: true
+  awsReleaseExcessIPs: true
+  updateEC2AdapterLimitViaAPI: true
+  gc-interval: 5m
+
+# IPv4 IPAM using AWS ENI
+ipam:
+  mode: eni
+  operator:
+    clusterPoolIPv4PodCIDRList: []  # ENI mode doesn't need this
+
+# Enable Hubble for network observability
+hubble:
+  enabled: true
+
+  # Hubble Relay for multi-node observability
+  relay:
+    enabled: true
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  # Hubble UI for visualization
+  ui:
+    enabled: true
+    replicas: 1
+    backend:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    frontend:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    ingress:
+      enabled: false  # Enable via environment config
+      className: nginx
+      annotations: {}
+      hosts: []
+      tls: []
+
+  # Hubble metrics for Prometheus
+  metrics:
+    enabled: ["dns", "drop", "tcp", "flow", "port-distribution", "icmp", "httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction"]
+
+    serviceMonitor:
+      enabled: true
+      labels:
+        prometheus: kube-prometheus-stack
+
+    dashboards:
+      enabled: true
+      namespace: monitoring
+      annotations: {}
+
+# Prometheus metrics for Cilium agent
+prometheus:
+  enabled: true
+  port: 9962
+  serviceMonitor:
+    enabled: true
+    labels:
+      prometheus: kube-prometheus-stack
+    interval: "30s"
+
+# Cilium Operator configuration
+operator:
+  replicas: 2
+
+  # Prometheus metrics for operator
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      labels:
+        prometheus: kube-prometheus-stack
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Performance: Replace kube-proxy with eBPF
+kubeProxyReplacement: strict
+
+# Kube-proxy replacement features
+k8sServiceHost: ${KUBERNETES_SERVICE_HOST}
+k8sServicePort: ${KUBERNETES_SERVICE_PORT}
+
+# Enable bandwidth manager for fair queueing (critical for multi-tenant ML)
+bandwidthManager:
+  enabled: true
+  bbr: true  # TCP BBR congestion control algorithm
+
+# Network policy enforcement
+policyEnforcementMode: default
+
+# Enable endpoint health checking
+enableEndpointHealthChecking: true
+
+# Identity allocation mode
+identityAllocationMode: crd
+
+# Enable local redirect policy for efficiency
+localRedirectPolicy: true
+
+# BPF masquerading for better performance
+bpf:
+  masquerade: true
+  clockProbe: true
+
+  # Increase limits for large-scale deployments
+  ctTcpMax: 524288
+  ctAnyMax: 262144
+  natMax: 524288
+  neighMax: 524288
+  policyMapMax: 16384
+  lbMapMax: 65536
+
+# IPv4 settings
+ipv4:
+  enabled: true
+
+# IPv6 disabled (can enable if needed)
+ipv6:
+  enabled: false
+
+# Enable health checking
+healthChecking: true
+
+# Resources for Cilium agent
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Rollout strategy
+rollOutCiliumPods: true
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Security context
+securityContext:
+  privileged: true
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_MODULE
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_MODULE
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# Tolerations for system nodes
+tolerations:
+  - operator: Exists
+
+# Image configuration
+image:
+  repository: quay.io/cilium/cilium
+  tag: v1.16.5
+  pullPolicy: IfNotPresent
+  useDigest: false
+
+# Cluster mesh (disabled by default, enable per environment)
+clustermesh:
+  useAPIServer: false
+  apiserver:
+    replicas: 2
+    service:
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# Encryption (disabled by default due to performance impact)
+encryption:
+  enabled: false
+  type: wireguard
+  nodeEncryption: false
+
+# Enable ENI prefix delegation for more IPs per node
+enableIPv4BIGTCP: false
+
+# Logging
+debug:
+  enabled: false
+
+# AWS-specific settings
+aws: {}
+
+# Monitoring
+monitor:
+  enabled: true
+
+# External workloads (for hybrid scenarios)
+externalWorkloads:
+  enabled: false
+
+# BGP (disabled by default)
+bgp:
+  enabled: false
+  announce:
+    loadbalancerIP: false
+    podCIDR: false
+
+# Service mesh features (optional)
+envoy:
+  enabled: false  # Can enable for L7 load balancing
+
+# Node initialization
+nodeinit:
+  enabled: true
+  resources:
+    limits:
+      cpu: 100m
+      memory: 100Mi
+
+# Preflight checks
+preflight:
+  enabled: false
+
+# CNI configuration
+cni:
+  binPath: /opt/cni/bin
+  confPath: /etc/cni/net.d
+  exclusive: true
+  install: true
+
+# Container runtime integration
+containerRuntime:
+  integration: containerd
+
+# Socket path
+socketPath: /var/run/cilium/cilium.sock

@@ -1,0 +1,30 @@
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: aurora-app-credentials
+  namespace: default
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws
+  target:
+    name: aurora-app
+    creationPolicy: Owner
+  data:
+  - secretKey: username
+    remoteRef:
+      key: dev-aurora-credentials # replace per environment
+      property: username
+  - secretKey: password
+    remoteRef:
+      key: dev-aurora-credentials
+      property: password
+  - secretKey: engine
+    remoteRef:
+      key: dev-aurora-credentials
+      property: engine
+  - secretKey: dbname
+    remoteRef:
+      key: dev-aurora-credentials
+      property: dbname

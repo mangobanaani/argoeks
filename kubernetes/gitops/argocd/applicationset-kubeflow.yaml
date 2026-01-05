@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: kubeflow-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            kubeflow: "enabled"
+  template:
+    metadata:
+      name: "{{name}}-kubeflow"
+    spec:
+      project: platform
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/kubeflow/overlays/{{metadata.labels.environment}}
+      destination:
+        server: "{{server}}"
+        namespace: kubeflow
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+

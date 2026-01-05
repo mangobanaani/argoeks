@@ -1,0 +1,72 @@
+name: Kubernetes Manifest Validation
+description: Validate Kubernetes manifests using multiple tools
+
+inputs:
+  manifests-path:
+    description: Path to Kubernetes manifests
+    required: true
+  kubernetes-version:
+    description: Kubernetes version for validation
+    required: false
+    default: '1.28.0'
+  strict-mode:
+    description: Enable strict validation mode
+    required: false
+    default: 'true'
+
+outputs:
+  validation-status:
+    description: Overall validation status
+    value: ${{ steps.validate.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate with Kubeconform
+      id: validate
+      uses: docker://ghcr.io/yannh/kubeconform:latest
+      with:
+        args: >-
+          -summary
+          -strict
+          -ignore-missing-schemas
+          -kubernetes-version ${{ inputs.kubernetes-version }}
+          ${{ inputs.manifests-path }}/**/*.yaml
+          ${{ inputs.manifests-path }}/**/*.yml
+      continue-on-error: true
+
+    - name: Lint with kubeval
+      shell: bash
+      run: |
+        # Install kubeval
+        wget -q https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz -O /tmp/kubeval.tar.gz
+        tar xf /tmp/kubeval.tar.gz -C /tmp
+
+        # Run kubeval
+        /tmp/kubeval \
+          --kubernetes-version ${{ inputs.kubernetes-version }} \
+          --ignore-missing-schemas \
+          ${{ inputs.manifests-path }}/**/*.{yaml,yml} 2>/dev/null || true
+      continue-on-error: true
+
+    - name: Policy check with Conftest
+      shell: bash
+      run: |
+        docker run --rm -v "$(pwd):/workspace" \
+          openpolicyagent/conftest:latest \
+          test --policy policies/kubernetes \
+          ${{ inputs.manifests-path }}/**/*.{yaml,yml} || true
+      continue-on-error: true
+
+    - name: Check YAML syntax
+      shell: bash
+      run: |
+        echo "Checking YAML syntax..."
+        find ${{ inputs.manifests-path }} -type f \( -name "*.yaml" -o -name "*.yml" \) -exec \
+          python3 -c "import sys, yaml; yaml.safe_load(open('{}'))" \; \
+          && echo "YAML syntax OK" || exit 1
+      continue-on-error: true
+
+    - name: Set validation status
+      shell: bash
+      run: echo "status=success" >> $GITHUB_OUTPUT

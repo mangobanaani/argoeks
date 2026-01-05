@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: observability-fleet
+  namespace: argocd
+spec:
+  generators:
+    # Use ArgoCD's cluster generator; assumes clusters are registered in ArgoCD
+    - clusters: {}
+  template:
+    metadata:
+      name: "{{name}}-observability"
+      labels:
+        cluster: "{{name}}"
+        cluster-type: "{{metadata.labels.cluster-type}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/observability/kube-prometheus-stack
+        helm:
+          releaseName: kube-prometheus-stack
+          valueFiles:
+            - values.yaml
+          parameters:
+            - name: grafana.adminPassword
+              value: "admin"
+            - name: prometheus.prometheusSpec.externalLabels.cluster
+              value: "{{name}}"
+            - name: prometheus.prometheusSpec.thanos.objectStorageConfig.existingSecret
+              value: "thanos-objstore"
+            - name: grafana.service.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-scheme
+              value: "internal"
+      destination:
+        server: "{{server}}"
+        namespace: monitoring
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

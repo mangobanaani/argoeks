@@ -1,0 +1,21 @@
+# Helm values for Argo CD in the management (hub) cluster
+global:
+  image:
+    tag: "v2.10.0"
+server:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+applicationSet:
+  enabled: true
+configs:
+  params: {}
+
+# Redis configuration - use stable 7.x version instead of 8.x
+redis:
+  image:
+    repository: public.ecr.aws/docker/library/redis
+    tag: 7.4.2-alpine
+  # Set a password to avoid empty requirepass configuration error
+  enabled: true

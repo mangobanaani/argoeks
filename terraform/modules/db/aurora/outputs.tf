@@ -1,0 +1,9 @@
+output "cluster_arn" { value = aws_rds_cluster.this.arn }
+output "cluster_id" { value = aws_rds_cluster.this.id }
+output "writer_endpoint" { value = aws_rds_cluster.this.endpoint }
+output "reader_endpoint" { value = aws_rds_cluster.this.reader_endpoint }
+output "port" { value = local.db_port }
+output "security_group_id" { value = aws_security_group.db.id }
+output "secret_arn" { value = var.create_password_secret ? aws_secretsmanager_secret.db[0].arn : null }
+output "secret_name" { value = var.create_password_secret ? aws_secretsmanager_secret.db[0].name : null }
+output "instance_ids" { value = [for i in aws_rds_cluster_instance.this : i.id] }

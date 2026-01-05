@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cilium-cni
+  namespace: argocd
+spec:
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: "{{name}}-cilium"
+      labels:
+        cluster: "{{name}}"
+        app.kubernetes.io/component: cni
+    spec:
+      project: default
+      sources:
+        - repoURL: https://helm.cilium.io/
+          chart: cilium
+          targetRevision: 1.16.5
+          helm:
+            releaseName: cilium
+            valueFiles:
+              - $values/platform/cilium/values.yaml
+            parameters:
+              - name: k8sServiceHost
+                value: "{{metadata.annotations.k8s_service_host}}"
+              - name: k8sServicePort
+                value: "{{metadata.annotations.k8s_service_port}}"
+        - repoURL: https://example.com/gitops-repo.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: "{{server}}"
+        namespace: kube-system
+      syncPolicy:
+        automated:
+          prune: false
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+          - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+      ignoreDifferences:
+        - group: ""
+          kind: ConfigMap
+          name: cilium-config
+          jsonPointers:
+            - /data/custom-calls

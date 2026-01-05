@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: tenants
+  namespace: argocd
+spec:
+  description: Tenant applications
+  sourceRepos:
+    - '*'
+  destinations:
+    - namespace: tenant-*
+      server: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  roles:
+    - name: tenant-readonly
+      description: Read-only for tenants
+      policies:
+        - p, proj:tenants:tenant-readonly, applications, get, tenants/*, allow
+      groups:
+        - platform:readonly
+

@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: feast-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            feast: "enabled"
+  template:
+    metadata:
+      name: "{{name}}-feast"
+    spec:
+      project: platform
+      source:
+        repoURL: https://example.com/gitops-repo.git
+        targetRevision: main
+        path: platform/feast/overlays/{{metadata.labels.environment}}
+      destination:
+        server: "{{server}}"
+        namespace: feast
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: ["CreateNamespace=true"]
+

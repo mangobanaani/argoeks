@@ -1,0 +1,54 @@
+name: Fleet Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to apply (dev|qa|prod)"
+        required: true
+        default: "dev"
+      region:
+        description: "AWS region"
+        required: true
+        default: "us-east-1"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      TF_IN_AUTOMATION: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.region }}
+
+      - name: Terraform fmt (check)
+        working-directory: terraform
+        run: terraform fmt -recursive -check
+
+      - name: Init
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: terraform init -input=false
+
+      - name: Validate
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: terraform validate
+
+      - name: Plan
+        id: plan
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: terraform plan -input=false -no-color -var="region=${{ github.event.inputs.region }}" -out=plan.tfplan
+
+      - name: Apply (wave)
+        if: ${{ !cancelled() }}
+        working-directory: terraform/environments/${{ github.event.inputs.environment }}
+        run: terraform apply -input=false -auto-approve plan.tfplan

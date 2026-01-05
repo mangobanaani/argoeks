@@ -1,0 +1,245 @@
+name: Container Build and Push
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - build/**
+      - .github/workflows/container-build-push.yml
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - build/**
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_USERNAME: ${{ github.actor }}
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    name: Determine Images to Build
+    outputs:
+      images: ${{ steps.images.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find all container images
+        id: images
+        run: |
+          IMAGES=()
+          for dockerfile in $(find build -name "Dockerfile" -type f); do
+            dir=$(dirname "$dockerfile")
+            image_name=$(basename "$dir")
+            IMAGES+=("\"$image_name\"")
+          done
+
+          if [ ${#IMAGES[@]} -eq 0 ]; then
+            IMAGES=("\"base-image\"")
+          fi
+
+          echo "matrix=$(printf '%s\n' "${IMAGES[@]}" | jq -R . | jq -s .)" >> $GITHUB_OUTPUT
+
+  build-and-scan:
+    runs-on: ubuntu-latest
+    name: Build ${{ matrix.image-name }}
+    needs: [build-matrix]
+    strategy:
+      matrix:
+        image-name: ${{ fromJson(needs.build-matrix.outputs.images) }}
+      fail-fast: false
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate build metadata
+        id: meta
+        run: |
+          IMAGE_FULL="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image-name }}"
+          echo "image-full=${IMAGE_FULL}" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "push-image=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "push-image=false" >> $GITHUB_OUTPUT
+          else
+            echo "push-image=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build container image
+        uses: ./.github/actions/container-build
+        with:
+          image-name: ${{ github.repository }}/${{ matrix.image-name }}
+          registry: ${{ env.REGISTRY }}
+          registry-username: ${{ env.REGISTRY_USERNAME }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          dockerfile: build/${{ matrix.image-name }}/Dockerfile
+          build-context: build/${{ matrix.image-name }}
+          push: ${{ steps.meta.outputs.push-image }}
+          scan-image: 'true'
+          build-args: |
+            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+
+      - name: Sign container image
+        if: steps.meta.outputs.push-image == 'true' && github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install Cosign
+        if: steps.meta.outputs.push-image == 'true' && github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.0'
+
+      - name: Sign image with Cosign
+        if: steps.meta.outputs.push-image == 'true' && github.event_name == 'push'
+        env:
+          REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          cosign sign --yes "${{ steps.meta.outputs.image-full }}@${{ steps.build.outputs.digest }}" || true
+        continue-on-error: true
+
+      - name: Generate image report
+        if: always()
+        run: |
+          cat > /tmp/image-report.md << 'EOF'
+          ### Container Image Build Report
+
+          **Image:** ${{ steps.meta.outputs.image-full }}
+          **Digest:** ${{ steps.build.outputs.digest }}
+          **Push:** ${{ steps.meta.outputs.push-image }}
+
+          #### Security Scan Results
+          - Trivy: ${{ steps.scan.outputs.results || 'N/A' }}
+
+          #### Build Details
+          - Dockerfile: build/${{ matrix.image-name }}/Dockerfile
+          - Context: build/${{ matrix.image-name }}
+          - Event: ${{ github.event_name }}
+          - Ref: ${{ github.ref_name }}
+          EOF
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Post report as PR comment
+            cat /tmp/image-report.md
+          fi
+
+  verify-image-signatures:
+    runs-on: ubuntu-latest
+    name: Verify Image Signatures
+    needs: [build-and-scan]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.0'
+
+      - name: Verify signatures
+        env:
+          REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          for image in $(find build -maxdepth 1 -type d ! -name build); do
+            image_name=$(basename "$image")
+            image_full="${{ env.REGISTRY }}/${{ github.repository }}/$image_name:${{ github.ref_name }}"
+            echo "Verifying $image_full..."
+            cosign verify "$image_full" || echo "Verification not completed yet"
+          done
+        continue-on-error: true
+
+  create-sbom:
+    runs-on: ubuntu-latest
+    name: Generate SBOM
+    needs: [build-and-scan]
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        image-name: ${{ fromJson(needs.build-matrix.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image-name }}:${{ github.ref_name }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.image-name }}-spdx.json
+        continue-on-error: true
+
+      - name: Generate SBOM with CycloneDX
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image-name }}:${{ github.ref_name }}
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.image-name }}-cyclonedx.json
+        continue-on-error: true
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.image-name }}
+          path: sbom-${{ matrix.image-name }}-*
+          retention-days: 30
+        continue-on-error: true
+
+  publish-release:
+    runs-on: ubuntu-latest
+    name: Publish Release
+    needs: [build-and-scan, verify-image-signatures]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create release notes
+        id: release-notes
+        run: |
+          cat > /tmp/release-notes.md << 'EOF'
+          # Release ${{ steps.version.outputs.version }}
+
+          ## Container Images
+
+          All container images have been built and published to ${{ env.REGISTRY }}/${{ github.repository }}
+
+          ### Images
+          EOF
+
+          for image in $(find build -maxdepth 1 -type d ! -name build); do
+            image_name=$(basename "$image")
+            echo "- \`${{ env.REGISTRY }}/${{ github.repository }}/$image_name:${{ steps.version.outputs.version }}\`" >> /tmp/release-notes.md
+          done
+
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: /tmp/release-notes.md
+          files: sbom-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

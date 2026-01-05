@@ -1,0 +1,211 @@
+envs:
+  dev:
+    alerts:
+      emails: ["dev-ops@example.com"]
+      slack: { workspace_id: "", channel_id: "" }
+      pagerduty: { service_key_ssm: "/dev/alerting/pagerduty/serviceKey" }
+    budgets: { amount: 500, currency: USD, thresholds: [80,95,100], billing_alarm_threshold: 450 }
+    monitoring:
+      alertmanager_secret_name: "/dev/alertmanager/config"
+      grafana: { dashboard_ids: ["1860:latest","315:latest"] }
+      alb_alarms:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-dev/xxxxxxxxxxxx"
+          elb_5xx_threshold: 5
+          elb_5xx_period: 60
+          elb_5xx_evals: 3
+          latency_threshold: 1.0
+          latency_stat: "p95"
+          latency_period: 60
+          latency_evals: 3
+      target_group_alarms:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-dev/xxxxxxxxxxxx"
+          tg_full_name: "REPLACE-targetgroup/argocd-dev/xxxxxxxx"
+          healthy_min: 1
+          unhealthy_max: 0
+          period: 60
+          evals: 3
+      s3_alarms:
+        - bucket: "dev-thanos-bucket"
+          five_xx_threshold: 5
+          four_xx_rate_threshold_percent: 2
+          period: 300
+          evals: 1
+        - bucket: "dev-mlflow-artifacts"
+          five_xx_threshold: 10
+          four_xx_rate_threshold_percent: 5
+          period: 300
+          evals: 2
+    kubeflow:
+      enabled: false
+      host: kubeflow.dev.eks.local
+      acm_cert_arn: ""
+      oidc:
+        issuer: "https://YOUR-IDP/oidc"
+        client_id: "kubeflow-dev"
+        client_secret_ssm: "/dev/kubeflow/oidc/clientSecret"
+      pipelines: { bucket: "dev-mlops-kfp", kms_arn: "" }
+    functions:
+      - name: hello-dev
+        package: hello
+        runtime: python3.12
+        handler: handler.handler
+        http_api: { enabled: true, routes: ["GET /", "GET /health"] }
+        env: { STAGE: dev }
+    features:
+      infrastructure:
+        eks: true
+        karpenter: true
+        vpc_endpoints: true
+      storage:
+        s3: true
+        redis: false
+      security:
+        waf: true
+        guardduty: true
+      serving:
+        kserve: false
+        apigw: true
+      observability:
+        alb_alarms: true
+        tg_alarms: true
+        s3_alarms: false
+
+  qa:
+    alerts:
+      emails: ["qa-ops@example.com"]
+      slack: { workspace_id: "", channel_id: "" }
+    budgets: { amount: 1500, currency: USD, thresholds: [80,95,100], billing_alarm_threshold: 1300 }
+    monitoring:
+      alertmanager_secret_name: "/qa/alertmanager/config"
+      grafana: { dashboard_ids: ["1860:latest","315:latest"] }
+      alb_alarms:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-qa/xxxxxxxxxxxx"
+          elb_5xx_threshold: 5
+          elb_5xx_period: 60
+          elb_5xx_evals: 3
+          latency_threshold: 1.0
+          latency_stat: "p95"
+          latency_period: 60
+          latency_evals: 3
+      target_group_alarms:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-qa/xxxxxxxxxxxx"
+          tg_full_name: "REPLACE-targetgroup/argocd-qa/xxxxxxxx"
+          healthy_min: 1
+          unhealthy_max: 0
+          period: 60
+          evals: 3
+      s3_alarms:
+        - bucket: "qa-thanos-bucket"
+          five_xx_threshold: 10
+          four_xx_rate_threshold_percent: 2
+          period: 300
+          evals: 1
+    kubeflow:
+      enabled: false
+      host: kubeflow.qa.eks.local
+      acm_cert_arn: ""
+      oidc:
+        issuer: "https://YOUR-IDP/oidc"
+        client_id: "kubeflow-qa"
+        client_secret_ssm: "/qa/kubeflow/oidc/clientSecret"
+      pipelines: { bucket: "qa-mlops-kfp", kms_arn: "" }
+    functions: []
+    features:
+      infrastructure: { eks: true, karpenter: true }
+      serving: { kserve: false }
+
+  prod:
+    alerts:
+      emails: ["prod-noc@example.com"]
+      slack: { workspace_id: "", channel_id: "" }
+    budgets: { amount: 10000, currency: USD, thresholds: [70,85,95,100], billing_alarm_threshold: 9000 }
+    monitoring:
+      alertmanager_secret_name: "/prod/alertmanager/config"
+      grafana: { dashboard_ids: ["1860:latest","315:latest"] }
+      alb_alarms_primary:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-prod/xxxxxxxxxxxx"
+          elb_5xx_threshold: 5
+          elb_5xx_period: 60
+          elb_5xx_evals: 3
+          latency_threshold: 0.8
+          latency_stat: "p95"
+          latency_period: 60
+          latency_evals: 3
+      alb_alarms_secondary:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-prod/xxxxxxxxxxxx"
+          elb_5xx_threshold: 5
+          elb_5xx_period: 60
+          elb_5xx_evals: 3
+          latency_threshold: 0.8
+          latency_stat: "p95"
+          latency_period: 60
+          latency_evals: 3
+      target_group_alarms_primary:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-prod/xxxxxxxxxxxx"
+          tg_full_name: "REPLACE-targetgroup/argocd-prod/xxxxxxxx"
+          healthy_min: 2
+          unhealthy_max: 0
+          period: 60
+          evals: 3
+      target_group_alarms_secondary:
+        - service: argocd
+          lb_full_name: "REPLACE-app/argocd-prod/xxxxxxxxxxxx"
+          tg_full_name: "REPLACE-targetgroup/argocd-prod/xxxxxxxx"
+          healthy_min: 2
+          unhealthy_max: 0
+          period: 60
+          evals: 3
+      s3_alarms_primary:
+        - bucket: "prod-thanos-bucket"
+          five_xx_threshold: 10
+          four_xx_rate_threshold_percent: 1
+          period: 300
+          evals: 1
+      s3_alarms_secondary:
+        - bucket: "prod-thanos-bucket-dr"
+          five_xx_threshold: 10
+          four_xx_rate_threshold_percent: 1
+          period: 300
+          evals: 1
+    kubeflow:
+      enabled: false
+      host: kubeflow.prod.eks.internal
+      acm_cert_arn: ""
+      oidc:
+        issuer: "https://YOUR-IDP/oidc"
+        client_id: "kubeflow-prod"
+        client_secret_ssm: "/prod/kubeflow/oidc/clientSecret"
+      pipelines: { bucket: "prod-mlops-kfp", kms_arn: "" }
+    functions: []
+    features:
+      infrastructure: { eks: true, karpenter: true }
+      serving: { kserve: false }
+
+edge:
+  dev:
+    cloudfront:
+      enabled: false
+      acm_cert_arn: ""
+      aliases: []
+      origins:
+        - { id: app, type: alb, domain_name: "app.dev.internal" }
+        - { id: assets, type: s3, domain_name: "assets-dev.s3.amazonaws.com" }
+      behaviors:
+        - { is_default: true, origin_id: app, viewer_protocol_policy: redirect-to-https, allowed_methods: ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], cached_methods: ["GET","HEAD","OPTIONS"], function_associations: [] }
+        - { path_pattern: "/static/*", origin_id: assets, viewer_protocol_policy: redirect-to-https, allowed_methods: ["GET","HEAD","OPTIONS"], cached_methods: ["GET","HEAD","OPTIONS"], function_associations: [] }
+  prod:
+    cloudfront:
+      enabled: false
+      acm_cert_arn: ""
+      aliases: []
+      origins:
+        - { id: app, type: alb, domain_name: "app.prod.internal" }
+      behaviors:
+        - { is_default: true, origin_id: app, viewer_protocol_policy: redirect-to-https, allowed_methods: ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], cached_methods: ["GET","HEAD","OPTIONS"], function_associations: [] }

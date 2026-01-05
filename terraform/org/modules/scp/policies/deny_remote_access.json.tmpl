@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyRemoteSessions",
+      "Effect": "Deny",
+      "Action": [
+        "ssm:StartSession",
+        "ssm:ResumeSession",
+        "ssm:TerminateSession",
+        "ssm:StartAutomationExecution",
+        "ssm:SendCommand",
+        "ec2-instance-connect:SendSSHPublicKey"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotLike": {
+          "aws:PrincipalArn": ${allowed_principals}
+        }
+      }
+    }
+  ]
+}

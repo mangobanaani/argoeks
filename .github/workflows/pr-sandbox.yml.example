@@ -1,0 +1,73 @@
+name: PR Sandbox (Apply/Destroy)
+
+on:
+  pull_request:
+    types: [labeled, unlabeled, closed]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    if: |
+      github.event.action == 'labeled' && github.event.label.name == 'sandbox'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sandbox-pr-${{ github.event.number }}
+      cancel-in-progress: false
+    env:
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.7.5 }
+      - name: CLI docs status (dry run)
+        run: python3 scripts/argoeks.py --dry-run docs status
+      - name: Configure AWS OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Terraform init
+        working-directory: terraform/environments/sandbox
+        run: terraform init -input=false
+      - name: Terraform apply (sandbox)
+        working-directory: terraform/environments/sandbox
+        run: |
+          terraform apply -auto-approve -input=false \
+            -var="region=${{ env.AWS_REGION }}" \
+            -var="cluster_count=1" \
+            -var="name_prefix=sbx-pr-${{ github.event.number }}"
+
+  destroy:
+    if: |
+      (github.event.action == 'unlabeled' && github.event.label.name == 'sandbox') ||
+      github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sandbox-pr-${{ github.event.number }}
+      cancel-in-progress: false
+    env:
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.7.5 }
+      - name: CLI docs status (dry run)
+        run: python3 scripts/argoeks.py --dry-run docs status
+      - name: Configure AWS OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Terraform init
+        working-directory: terraform/environments/sandbox
+        run: terraform init -input=false
+      - name: Terraform destroy (sandbox)
+        working-directory: terraform/environments/sandbox
+        run: |
+          terraform destroy -auto-approve -input=false \
+            -var="region=${{ env.AWS_REGION }}" \
+            -var="cluster_count=1" \
+            -var="name_prefix=sbx-pr-${{ github.event.number }}"

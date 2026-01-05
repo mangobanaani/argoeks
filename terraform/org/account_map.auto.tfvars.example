@@ -1,0 +1,28 @@
+# Example account map loaded automatically via *.auto.tfvars.* files.
+
+account_definitions = {
+  shared_services = {
+    email  = "aws+shared@example.com"
+    name   = "Shared Services"
+    ou_key = "shared-services"
+    tags   = { environment = "shared" }
+  }
+  data = {
+    email  = "aws+data@example.com"
+    ou_key = "data"
+  }
+  training = {
+    email         = "aws+training@example.com"
+    ou_key        = "training"
+    iam_role_name = "OrganizationAccountAccessTerraform"
+    tags          = { environment = "training" }
+  }
+  serving = {
+    email  = "aws+serving@example.com"
+    ou_key = "serving"
+  }
+  experiments = {
+    email  = "aws+experiments@example.com"
+    ou_key = "experiments"
+  }
+}

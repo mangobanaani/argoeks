@@ -1,0 +1,92 @@
+# GitLab CI Security scanning configuration
+# Included in main .gitlab-ci.yml
+
+.security_scan_base:
+  allow_failure: true
+  artifacts:
+    reports:
+      sast: scan-results.sarif
+    expire_in: 30 days
+
+.tfsec_scan:
+  extends: .security_scan_base
+  image: aquasec/tfsec:latest
+  script:
+    - tfsec . --format sarif --out scan-results.sarif || true
+
+.checkov_scan:
+  extends: .security_scan_base
+  image: bridgecrewio/checkov:latest
+  script:
+    - checkov --directory . --framework terraform --output sarif --output-file scan-results.sarif || true
+
+.trivy_scan:
+  extends: .security_scan_base
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs . --format sarif --output scan-results.sarif || true
+
+.kube_bench:
+  stage: scan
+  image: aquasec/kube-bench:latest
+  script:
+    - kube-bench run --targets node,policies --json > kube-bench-results.json || true
+  artifacts:
+    paths:
+      - kube-bench-results.json
+    expire_in: 30 days
+  allow_failure: true
+
+.policy_enforcement:
+  stage: scan
+  image: openpolicyagent/conftest:latest
+  script:
+    - |
+      echo "Running policy enforcement checks..."
+      conftest test --policy policies/terraform terraform/ || true
+      conftest test --policy policies/kubernetes kubernetes/ || true
+  allow_failure: true
+
+.dependency_check:
+  stage: scan
+  image: python:3.11
+  script:
+    - |
+      pip install safety bandit
+      # Python dependency check
+      if [ -f requirements.txt ]; then
+        safety check --file requirements.txt || true
+      fi
+      if [ -f requirements-dev.txt ]; then
+        safety check --file requirements-dev.txt || true
+      fi
+      # Python code security
+      bandit -r scripts/ -f json -o bandit-results.json || true
+  artifacts:
+    paths:
+      - bandit-results.json
+    expire_in: 30 days
+  allow_failure: true
+
+.secret_detection:
+  stage: scan
+  image: python:3.11
+  script:
+    - |
+      pip install detect-secrets
+      detect-secrets scan --baseline .secrets.baseline || true
+      if [ -f .secrets.baseline ]; then
+        detect-secrets audit .secrets.baseline || true
+      fi
+  allow_failure: true
+
+.container_registry_scan:
+  stage: scan
+  image: aquasec/trivy:latest
+  script:
+    - |
+      echo "Scanning container registry images..."
+      # Scan images in registry
+      trivy image --severity HIGH,CRITICAL \
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA || true
+  allow_failure: true

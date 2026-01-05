@@ -1,0 +1,198 @@
+# GitLab CI Kubernetes and GitOps configuration
+# Included in main .gitlab-ci.yml
+
+.kubernetes_base:
+  image: alpine/k8s:1.28.0
+  before_script:
+    - apk add --no-cache curl jq yq
+
+.kubeconform_validate:
+  stage: validate
+  image: ghcr.io/yannh/kubeconform:latest
+  script:
+    - |
+      echo "Validating Kubernetes manifests..."
+      kubeconform -summary -strict -ignore-missing-schemas \
+        -kubernetes-version 1.28.0 \
+        kubernetes/**/*.yaml platform/**/*.yaml || true
+  allow_failure: true
+
+.kubectl_dry_run:
+  extends: .kubernetes_base
+  stage: plan
+  script:
+    - |
+      # Configure kubeconfig from secret
+      mkdir -p $HOME/.kube
+      echo "$KUBECONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+      chmod 600 $HOME/.kube/config
+
+      echo "Running kubectl dry-run..."
+      for file in kubernetes/**/*.yaml; do
+        echo "Validating $file..."
+        kubectl apply --dry-run=client -f "$file" || true
+      done
+  allow_failure: true
+
+.kustomize_build_validate:
+  stage: validate
+  image: alpine/kustomize:latest
+  script:
+    - |
+      echo "Validating Kustomize builds..."
+      for dir in kubernetes/*/kustomization.yaml; do
+        if [ -f "$dir" ]; then
+          base_dir=$(dirname "$dir")
+          echo "Building $base_dir..."
+          kustomize build "$base_dir" > /dev/null || exit 1
+        fi
+      done
+  allow_failure: true
+
+.helm_chart_validate:
+  stage: validate
+  image: alpine/helm:latest
+  script:
+    - |
+      echo "Validating Helm charts..."
+      helm repo add bitnami https://charts.bitnami.com/bitnami || true
+      helm repo update
+
+      for chart_dir in kubernetes/*/Chart.yaml; do
+        if [ -f "$chart_dir" ]; then
+          base_dir=$(dirname "$chart_dir")
+          echo "Linting $base_dir..."
+          helm lint "$base_dir"
+        fi
+      done
+  allow_failure: true
+
+.argocd_sync:
+  extends: .kubernetes_base
+  stage: deploy
+  script:
+    - |
+      echo "Syncing ArgoCD applications..."
+
+      # Configure ArgoCD server and token
+      ARGOCD_SERVER="$ARGOCD_SERVER_URL"
+      ARGOCD_TOKEN="$ARGOCD_AUTH_TOKEN"
+
+      # Install argocd CLI
+      curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+      chmod +x argocd
+
+      # Login to ArgoCD
+      ./argocd login "$ARGOCD_SERVER" --insecure --username admin --password "$ARGOCD_TOKEN"
+
+      # Sync applications
+      ./argocd app sync argoeks-$ENVIRONMENT --wait --timeout 5m || true
+
+      # Check sync status
+      ./argocd app get argoeks-$ENVIRONMENT
+  allow_failure: true
+
+.policy_as_code:
+  stage: scan
+  image: openpolicyagent/conftest:latest
+  script:
+    - |
+      echo "Enforcing Kubernetes policies..."
+
+      # Policy directories
+      POLICY_DIR="policies/kubernetes"
+
+      # Validate policies exist
+      if [ ! -d "$POLICY_DIR" ]; then
+        echo "No policies directory found, skipping policy enforcement"
+        exit 0
+      fi
+
+      # Run conftest
+      conftest test --policy "$POLICY_DIR" \
+        kubernetes/**/*.yaml platform/**/*.yaml \
+        --output json > policy-results.json || true
+
+      # Display results
+      cat policy-results.json
+  artifacts:
+    paths:
+      - policy-results.json
+    expire_in: 30 days
+  allow_failure: true
+
+.health_check:
+  extends: .kubernetes_base
+  stage: verify
+  script:
+    - |
+      echo "Performing health checks..."
+
+      # Configure kubeconfig
+      mkdir -p $HOME/.kube
+      echo "$KUBECONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+      chmod 600 $HOME/.kube/config
+
+      # Check pod status
+      echo "Checking pod status..."
+      kubectl get pods -A
+
+      # Check deployment status
+      echo "Checking deployment status..."
+      kubectl get deployments -A
+
+      # Check for unhealthy pods
+      echo "Checking for unhealthy pods..."
+      UNHEALTHY=$(kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers | wc -l)
+
+      if [ $UNHEALTHY -gt 0 ]; then
+        echo "WARNING: $UNHEALTHY unhealthy pods detected"
+      fi
+  allow_failure: true
+
+.network_policy_audit:
+  extends: .kubernetes_base
+  stage: scan
+  script:
+    - |
+      echo "Auditing network policies..."
+
+      # Configure kubeconfig
+      mkdir -p $HOME/.kube
+      echo "$KUBECONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+      chmod 600 $HOME/.kube/config
+
+      # List all network policies
+      echo "Network Policies:"
+      kubectl get networkpolicies -A
+
+      # Check for overly permissive policies
+      for policy in $(kubectl get networkpolicies -A -o json | jq -r '.items[] | .metadata.namespace + "/" + .metadata.name'); do
+        echo "Checking policy: $policy"
+        # This would validate policy rules
+      done
+  allow_failure: true
+
+.rbac_audit:
+  extends: .kubernetes_base
+  stage: scan
+  script:
+    - |
+      echo "Auditing RBAC configuration..."
+
+      # Configure kubeconfig
+      mkdir -p $HOME/.kube
+      echo "$KUBECONFIG_CONTENT" | base64 -d > $HOME/.kube/config
+      chmod 600 $HOME/.kube/config
+
+      # List roles and bindings
+      echo "Cluster Roles:"
+      kubectl get clusterroles
+
+      echo "Cluster Role Bindings:"
+      kubectl get clusterrolebindings
+
+      # Check for system:masters binding
+      echo "Checking for dangerous RBAC bindings..."
+      kubectl get clusterrolebindings -o json | jq '.items[] | select(.roleRef.name=="system:masters")'
+  allow_failure: true

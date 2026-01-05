@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inferenceservice-config
+  namespace: kserve
+data:
+  storageInitializer: |
+    storageInitializerImage: kserve/storage-initializer:v0.11.2
+    timeout: 300
+  s3: |
+    endpoint: s3.amazonaws.com
+    region: us-east-1
+    scheme: https
+    useSDKCreds: true
+  credentials: |
+    {} # IRSA provides credentials, no static secrets

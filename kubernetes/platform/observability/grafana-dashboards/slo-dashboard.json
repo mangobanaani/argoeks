@@ -1,0 +1,216 @@
+{
+  "dashboard": {
+    "title": "SLO Dashboard - Platform Health",
+    "tags": ["slo", "sli", "reliability"],
+    "timezone": "browser",
+    "schemaVersion": 36,
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Availability SLI (99% Target)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sli:api:availability:ratio_rate5m",
+            "legendFormat": "Availability"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.99, "color": "yellow"},
+                {"value": 0.995, "color": "green"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "API Latency P95 (1s Target)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sli:api:latency:p95",
+            "legendFormat": "P95 Latency"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 0.8, "color": "yellow"},
+                {"value": 1.0, "color": "red"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Error Budget Remaining",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "sli:error_budget:remaining_ratio",
+            "legendFormat": "Error Budget"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.1, "color": "orange"},
+                {"value": 0.3, "color": "yellow"},
+                {"value": 0.5, "color": "green"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "ArgoCD Sync Success Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sli:argocd:sync_success_rate",
+            "legendFormat": "Sync Success"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.95, "color": "yellow"},
+                {"value": 0.99, "color": "green"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+      },
+      {
+        "id": 5,
+        "title": "Availability Trend (7 days)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sli:api:availability:ratio_rate1h",
+            "legendFormat": "Availability"
+          },
+          {
+            "expr": "vector(0.99)",
+            "legendFormat": "SLO Target (99%)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0.98,
+            "max": 1.0
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "Latency Trend (7 days)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sli:api:latency:p95",
+            "legendFormat": "P95"
+          },
+          {
+            "expr": "sli:api:latency:p99",
+            "legendFormat": "P99"
+          },
+          {
+            "expr": "vector(1.0)",
+            "legendFormat": "SLO Target (1s)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 7,
+        "title": "Cilium Endpoint Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sli:cilium:endpoint_health_rate",
+            "legendFormat": "Endpoints Ready"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 0.98, "color": "yellow"},
+                {"value": 0.99, "color": "green"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16}
+      },
+      {
+        "id": 8,
+        "title": "Karpenter Provisioning P95",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sli:karpenter:provisioning_duration_p95",
+            "legendFormat": "P95 Duration"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 180, "color": "yellow"},
+                {"value": 300, "color": "red"}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 16}
+      }
+    ],
+    "refresh": "30s",
+    "time": {
+      "from": "now-7d",
+      "to": "now"
+    }
+  }
+}

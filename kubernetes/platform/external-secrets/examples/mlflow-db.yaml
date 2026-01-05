@@ -1,0 +1,31 @@
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: mlflow-db-credentials
+  namespace: mlflow
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws
+  target:
+    name: mlflow-db
+    creationPolicy: Owner
+  data:
+  - secretKey: username
+    remoteRef:
+      key: dev-mlops-postgres-credentials
+      property: username
+  - secretKey: password
+    remoteRef:
+      key: dev-mlops-postgres-credentials
+      property: password
+  - secretKey: engine
+    remoteRef:
+      key: dev-mlops-postgres-credentials
+      property: engine
+  - secretKey: dbname
+    remoteRef:
+      key: dev-mlops-postgres-credentials
+      property: dbname
+

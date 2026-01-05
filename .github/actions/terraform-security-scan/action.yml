@@ -1,0 +1,84 @@
+name: Terraform Security Scan
+description: Run security scanning on Terraform code using tfsec, checkov, and infracost
+
+inputs:
+  terraform-directory:
+    description: Directory containing Terraform code
+    required: true
+  severity-level:
+    description: Minimum severity level to report (CRITICAL, HIGH, MEDIUM, LOW)
+    required: false
+    default: MEDIUM
+  infracost-api-key:
+    description: Infracost API key for cost estimation
+    required: false
+  checkov-framework:
+    description: Checkov framework to run
+    required: false
+    default: terraform
+
+outputs:
+  tfsec-findings:
+    description: Number of tfsec findings
+    value: ${{ steps.tfsec.outputs.findings || '0' }}
+  checkov-failed:
+    description: Number of failed Checkov checks
+    value: ${{ steps.checkov.outputs.failed || '0' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run tfsec
+      id: tfsec
+      uses: aquasecurity/tfsec-action@v1.0.7
+      with:
+        working_directory: ${{ inputs.terraform-directory }}
+        scan_type: all
+        format: sarif
+        out: tfsec-results.sarif
+      continue-on-error: true
+
+    - name: Upload tfsec results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: tfsec-results.sarif
+        category: tfsec
+      continue-on-error: true
+
+    - name: Run Checkov
+      id: checkov
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: ${{ inputs.terraform-directory }}
+        framework: ${{ inputs.checkov-framework }}
+        quiet: false
+        soft_fail: true
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+      continue-on-error: true
+
+    - name: Upload Checkov results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: checkov-results.sarif
+        category: checkov
+      continue-on-error: true
+
+    - name: Run Infracost
+      id: infracost
+      uses: infracost/actions/setup@v2
+      if: inputs.infracost-api-key != ''
+      with:
+        api-key: ${{ inputs.infracost-api-key }}
+      continue-on-error: true
+
+    - name: Generate Infracost cost estimate
+      if: steps.infracost.outcome == 'success'
+      shell: bash
+      working-directory: ${{ inputs.terraform-directory }}
+      run: |
+        infracost breakdown --path . --format json > infracost-breakdown.json || true
+        infracost breakdown --path . --format table
+      continue-on-error: true

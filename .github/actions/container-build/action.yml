@@ -1,0 +1,132 @@
+name: Container Build and Push
+description: Build container image with security scanning and push to registry
+
+inputs:
+  image-name:
+    description: Container image name (without registry)
+    required: true
+  registry:
+    description: Container registry URL
+    required: true
+    default: ghcr.io
+  registry-username:
+    description: Registry username
+    required: false
+  registry-password:
+    description: Registry password or token
+    required: false
+  dockerfile:
+    description: Path to Dockerfile
+    required: false
+    default: Dockerfile
+  build-context:
+    description: Build context directory
+    required: false
+    default: '.'
+  push:
+    description: Push image to registry
+    required: false
+    default: 'false'
+  scan-image:
+    description: Scan image for vulnerabilities
+    required: false
+    default: 'true'
+  build-args:
+    description: Build arguments as JSON object
+    required: false
+
+outputs:
+  image-uri:
+    description: Full image URI with registry
+    value: ${{ steps.build.outputs.image-uri }}
+  image-digest:
+    description: Image digest
+    value: ${{ steps.build.outputs.digest }}
+  scan-results:
+    description: Vulnerability scan results
+    value: ${{ steps.scan.outputs.results || 'N/A' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to container registry
+      if: inputs.push == 'true' && inputs.registry-username != ''
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.registry-username }}
+        password: ${{ inputs.registry-password }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ inputs.registry }}/${{ inputs.image-name }}
+        tags: |
+          type=ref,event=branch
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build container image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ inputs.build-context }}
+        file: ${{ inputs.dockerfile }}
+        push: ${{ inputs.push }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          VCS_REF=${{ github.sha }}
+          VERSION=${{ github.ref_name }}
+          ${{ inputs.build-args }}
+
+    - name: Output image URI
+      id: image-uri
+      shell: bash
+      run: |
+        echo "image-uri=${{ inputs.registry }}/${{ inputs.image-name }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
+
+    - name: Scan image with Trivy
+      id: scan
+      if: inputs.scan-image == 'true'
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ steps.image-uri.outputs.image-uri }}
+        format: sarif
+        output: trivy-results.sarif
+        severity: CRITICAL,HIGH
+      continue-on-error: true
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() && inputs.scan-image == 'true'
+      with:
+        sarif_file: trivy-results.sarif
+        category: trivy
+      continue-on-error: true
+
+    - name: Generate SBOM with Syft
+      if: inputs.push == 'true'
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ steps.image-uri.outputs.image-uri }}
+        format: cyclonedx-json
+        output-file: sbom.json
+      continue-on-error: true
+
+    - name: Upload SBOM as artifact
+      if: inputs.push == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ inputs.image-name }}
+        path: sbom.json
+      continue-on-error: true

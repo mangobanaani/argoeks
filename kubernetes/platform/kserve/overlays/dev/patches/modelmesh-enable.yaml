@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: modelmesh-controller-config
+  namespace: kserve
+data:
+  config.yaml: |
+    managementState: Managed
+    storageSecretName: "" # IRSA used
+    storageType: s3
+    s3Connection:
+      region: us-east-1
+      address: s3.amazonaws.com
+      authType: sdk

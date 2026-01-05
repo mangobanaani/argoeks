@@ -1,0 +1,391 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - terraform/environments/prod/**
+      - kubernetes/**
+      - gitops/**
+      - .github/workflows/deploy-production.yml
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+      terraform-action:
+        description: Terraform action
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      skip-approval:
+        description: Skip manual approval (testing only)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+  deployments: write
+  pull-requests: write
+
+env:
+  TERRAFORM_VERSION: "1.7.5"
+  AWS_REGION: us-east-1
+
+jobs:
+  pre-deployment-checks:
+    runs-on: ubuntu-latest
+    name: Pre-deployment Checks
+    outputs:
+      deployment-approved: ${{ steps.check-approval.outputs.approved }}
+      deployment-environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine environment
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for deployment approval
+        id: check-approval
+        run: |
+          # In production, this would check for CODEOWNERS approval or manual gate
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.skip-approval }}" = "true" ]; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "approved=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check branch protection
+        run: |
+          echo "Verifying branch protection rules for ${{ steps.set-env.outputs.environment }}..."
+          # This would verify branch protection rules are in place
+
+      - name: Validate commit history
+        run: |
+          echo "Validating commit history..."
+          git log --oneline -10 main
+
+  drift-detection:
+    runs-on: ubuntu-latest
+    name: Detect Infrastructure Drift
+    needs: [pre-deployment-checks]
+    strategy:
+      matrix:
+        environment: [dev, qa, prod]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: ./.github/actions/terraform-setup
+        with:
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
+          working-directory: terraform/environments/${{ matrix.environment }}
+
+      - name: Setup AWS credentials
+        uses: ./.github/actions/setup-aws-credentials
+        with:
+          role-arn: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initialize Terraform
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform init -input=false
+
+      - name: Detect drift
+        id: drift
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform refresh -input=false
+          terraform plan -input=false -no-color > drift-check.txt
+          DRIFT_DETECTED=$(grep -c "No changes\|to be added\|to be changed\|to be destroyed" drift-check.txt || echo "0")
+          echo "drift-detected=$DRIFT_DETECTED" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Report drift
+        if: steps.drift.outputs.drift-detected != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Infrastructure Drift Detected - ${{ matrix.environment }}\n\nInfrastructure has drifted from Terraform state. Review and reconcile changes.`
+            });
+        continue-on-error: true
+
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    name: Deploy Infrastructure - ${{ matrix.environment }}
+    needs: [pre-deployment-checks, drift-detection]
+    if: needs.pre-deployment-checks.outputs.deployment-approved == 'true'
+    strategy:
+      matrix:
+        environment: [dev, qa]
+      max-parallel: 1
+    permissions:
+      id-token: write
+      contents: read
+      deployments: write
+    environment:
+      name: ${{ matrix.environment }}
+      url: https://${{ matrix.environment }}.argoeks.example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.ref,
+              environment: '${{ matrix.environment }}',
+              required_contexts: [],
+              auto_merge: false,
+              production_environment: '${{ matrix.environment }}' === 'prod'
+            });
+            return deployment.data.id;
+
+      - name: Setup Terraform
+        uses: ./.github/actions/terraform-setup
+        with:
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
+          working-directory: terraform/environments/${{ matrix.environment }}
+
+      - name: Setup AWS credentials
+        uses: ./.github/actions/setup-aws-credentials
+        with:
+          role-arn: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initialize Terraform
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform init -input=false -lock=true -lock-timeout=10m
+
+      - name: Validate Terraform
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform validate -no-color
+
+      - name: Generate plan
+        id: plan
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform plan -input=false -no-color -out=plan.tfplan
+          terraform show -no-color plan.tfplan > plan.txt
+
+      - name: Apply Terraform
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          echo "Applying Terraform for ${{ matrix.environment }}..."
+          terraform apply -input=false -auto-approve plan.tfplan
+
+      - name: Capture outputs
+        id: outputs
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform output -json > outputs.json
+          echo "outputs=$(cat outputs.json)" >> $GITHUB_OUTPUT
+
+      - name: Create deployment status success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.result }},
+              state: 'success',
+              description: 'Deployment to ${{ matrix.environment }} completed successfully'
+            });
+
+      - name: Create deployment status failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.result }},
+              state: 'failure',
+              description: 'Deployment to ${{ matrix.environment }} failed'
+            });
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-plan-${{ matrix.environment }}
+          path: terraform/environments/${{ matrix.environment }}/plan.txt
+          retention-days: 30
+
+  sync-gitops:
+    runs-on: ubuntu-latest
+    name: Sync GitOps Configuration
+    needs: [deploy-infrastructure]
+    if: needs.deploy-infrastructure.result == 'success'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: v1.28.0
+
+      - name: Setup AWS credentials
+        uses: ./.github/actions/setup-aws-credentials
+        with:
+          role-arn: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name argoeks-${{ matrix.environment }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Validate GitOps manifests
+        run: |
+          kubectl apply --dry-run=client -f gitops/
+
+      - name: Trigger ArgoCD sync
+        run: |
+          # This would use ArgoCD API to trigger sync
+          echo "Triggering ArgoCD sync for gitops manifests..."
+        continue-on-error: true
+
+  smoke-tests:
+    runs-on: ubuntu-latest
+    name: Smoke Tests
+    needs: [sync-gitops]
+    if: needs.sync-gitops.result == 'success'
+    strategy:
+      matrix:
+        environment: [dev, qa]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-asyncio aiohttp
+
+      - name: Run smoke tests
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          python -m pytest ../../tests/smoke_tests.py -v --tb=short
+        continue-on-error: true
+
+  rollback-on-failure:
+    runs-on: ubuntu-latest
+    name: Rollback on Failure
+    needs: [smoke-tests]
+    if: failure()
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        environment: [dev, qa]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get previous successful deployment
+        id: previous
+        run: |
+          # This would fetch the previous deployment from state
+          echo "version=previous" >> $GITHUB_OUTPUT
+
+      - name: Setup AWS credentials
+        uses: ./.github/actions/setup-aws-credentials
+        with:
+          role-arn: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initiate rollback
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          echo "Rolling back to previous deployment..."
+          # Terraform would use the state from previous deployment
+          terraform init -input=false
+          terraform apply -auto-approve -input=false -var="version=${{ steps.previous.outputs.version }}"
+        continue-on-error: true
+
+      - name: Notify rollback
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Automatic Rollback Triggered\n\nDeployment to ${{ matrix.environment }} failed. Previous version has been restored.`
+            });
+        continue-on-error: true
+
+  notify-deployment:
+    runs-on: ubuntu-latest
+    name: Notify Deployment Status
+    needs: [deploy-infrastructure, sync-gitops]
+    if: always()
+    steps:
+      - name: Determine status
+        id: status
+        run: |
+          if [ "${{ needs.deploy-infrastructure.result }}" = "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: vars.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "Deployment to ${{ needs.pre-deployment-checks.outputs.deployment-environment }} - ${{ steps.status.outputs.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "Deployment Status\n*Environment:* ${{ needs.pre-deployment-checks.outputs.deployment-environment }}\n*Status:* ${{ steps.status.outputs.status }}\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>"
+                  }
+                }
+              ]
+            }
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

@@ -1,0 +1,12 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: triton-sample
+  namespace: kserve
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: onnx
+      runtime: triton-runtime
+      storageUri: s3://my-models-dev/triton/ # replace with your model path

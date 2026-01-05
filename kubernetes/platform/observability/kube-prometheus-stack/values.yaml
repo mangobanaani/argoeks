@@ -1,0 +1,50 @@
+# Minimal, sane defaults for multi-cluster observability
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 15d
+    scrapeInterval: 30s
+    enableAdminAPI: false
+    externalLabels:
+      cluster: "${CLUSTER_NAME:-unknown}"
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 50Gi
+
+grafana:
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  service:
+    type: LoadBalancer
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+      folder: /var/lib/grafana/dashboards/k8s
+  grafana.ini:
+    server:
+      root_url: "%(protocol)s://%(domain)s/"
+    users:
+      allow_sign_up: false
+  defaultDashboardsEnabled: true
+
+alertmanager:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+kube-state-metrics:
+  enabled: true
+
+global:
+  imagePullSecrets: []
+
+fullnameOverride: kube-prometheus-stack

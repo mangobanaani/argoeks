@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kubeflow
+
+# NOTE: Vendor Kubeflow upstream into platform/kubeflow/upstream, then point resources there.
+resources:
+  - ../../upstream # replace with actual path to Kubeflow manifests
+patches:
+  - path: patches/dex-configmap.yaml
+  - path: patches/istio-gateway-svc.yaml
+  - path: patches/pipeline-configmap.yaml
+
+configMapGenerator:
+  - name: dex
+    behavior: replace
+    files:
+      - config.yaml=generated/dex-config.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+

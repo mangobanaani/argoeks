@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: externaldns-fleet
+  namespace: argocd
+spec:
+  generators:
+    - clusters: {}
+  template:
+    metadata:
+      name: "{{name}}-externaldns"
+      labels:
+        cluster: "{{name}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://kubernetes-sigs.github.io/external-dns/
+        chart: external-dns
+        targetRevision: 1.14.5
+        helm:
+          releaseName: external-dns
+          parameters:
+          - name: provider
+            value: "aws"
+          - name: policy
+            value: "sync"
+          - name: txtOwnerId
+            value: "external-dns-{{name}}"
+          - name: domainFilters[0]
+            value: "REPLACE_WITH_PRIVATE_ZONE" # set to your env's private domain
+          - name: serviceAccount.create
+            value: "true"
+          - name: serviceAccount.name
+            value: "external-dns"
+          - name: serviceAccount.annotations.eks\.amazonaws\.com/role-arn
+            value: "arn:aws:iam::REPLACE_WITH_AWS_ACCOUNT_ID:role/external-dns-{{name}}"
+      destination:
+        server: "{{server}}"
+        namespace: kube-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+

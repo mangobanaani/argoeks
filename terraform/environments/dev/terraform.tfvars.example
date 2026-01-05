@@ -1,0 +1,311 @@
+# MLOps Stack Configuration Example for Dev Environment
+
+# Cross-account settings (fill when using Organizations)
+workload_account_id       = ""
+workload_account_role_arn = ""
+management_role_arn       = ""
+assume_role_external_id   = ""
+
+# Optional AWS-managed EKS add-ons
+enable_cloudwatch_observability     = false
+enable_guardduty_runtime            = false
+enable_network_flow_monitor         = false
+enable_node_monitoring_agent        = false
+enable_pod_identity_agent           = false
+enable_secrets_store_provider       = false
+enable_hyperpod_observability       = false
+enable_hyperpod_task_governance     = false
+enable_hyperpod_training_operator   = false
+enable_sagemaker_spaces             = false
+
+argocd_capability = {
+  enable                       = true
+  identity_center_instance_arn = "arn:aws:sso:::instance/ssoins-your-instance"
+  admin_group_name             = "platform-admins"
+  readonly_group_name          = "platform-readonly"
+  namespace                    = "argocd"
+  server_url                   = null
+  network_access_type          = "PRIVATE"
+}
+
+# ===== Infrastructure Layer =====
+mlops_infrastructure = {
+  vpc_endpoints_mlops = {
+    enabled = true
+    config  = {}
+  }
+  data_lake = {
+    enabled = true
+    config  = {
+      enable_versioning = true
+      lifecycle_rules   = true
+    }
+  }
+  efs_mlops = {
+    enabled = false  # Enable if needed for shared notebooks
+    config  = {}
+  }
+  fsx_lustre = {
+    enabled = false  # Expensive, typically prod-only
+    config  = {}
+  }
+  gpu_nodes = {
+    enabled = true
+    config  = {
+      instance_types = ["g5.xlarge"]  # Smaller instances for dev
+      spot_ratio     = 0.9            # Aggressive spot usage in dev
+    }
+  }
+  transit_gateway = {
+    enabled = false  # Typically prod-only
+    config  = {}
+  }
+  network_firewall = {
+    enabled = false  # Compliance feature, typically prod-only
+    config  = {}
+  }
+  private_ca = {
+    enabled = true
+    config  = {}
+  }
+}
+
+# ===== Data Engineering =====
+mlops_data_engineering = {
+  # Batch Processing
+  glue = {
+    enabled = true
+    config  = {
+      max_concurrent_runs = 5
+    }
+  }
+  athena = {
+    enabled = true
+    config  = {}
+  }
+  emr = {
+    enabled = false  # Dev uses Glue instead
+    config  = {}
+  }
+  dbt = {
+    enabled = true
+    config  = {}
+  }
+
+  # Streaming
+  msk = {
+    enabled = false  # Expensive, typically qa/prod
+    config  = {}
+  }
+  kinesis = {
+    enabled = true
+    config  = {
+      retention_hours = 24
+    }
+  }
+  flink = {
+    enabled = false
+    config  = {}
+  }
+
+  # Feature Stores
+  feast = {
+    enabled = true
+    config  = {
+      online_store  = "dynamodb"
+      offline_store = "s3"
+    }
+  }
+  sagemaker_feature_store = {
+    enabled = false
+    config  = {}
+  }
+  tecton = {
+    enabled = false
+    config  = {}
+  }
+
+  # Data Quality
+  great_expectations = {
+    enabled = true
+    config  = {}
+  }
+  glue_data_quality = {
+    enabled = true
+    config  = {}
+  }
+  soda = {
+    enabled = false
+    config  = {}
+  }
+}
+
+# ===== ML Platform =====
+mlops_ml_platform = {
+  mlflow = {
+    enabled      = true
+    rds_instance = "db.t3.small"  # Smaller for dev
+    storage_gb   = 50
+    enable_auth  = false          # Simpler for dev
+    config       = {
+      multi_az = false            # Single AZ for dev
+    }
+  }
+  wandb = {
+    enabled = false
+    config  = {}
+  }
+  neptune = {
+    enabled = false
+    config  = {}
+  }
+  sagemaker_experiments = {
+    enabled = false
+    config  = {}
+  }
+}
+
+mlops_training = {
+  kubeflow_training = {
+    enabled = true
+    config  = {}
+  }
+  ray = {
+    enabled = true
+    config  = {
+      head_cpu    = 2
+      head_memory = 8
+    }
+  }
+  deepspeed = {
+    enabled = false  # Prod-only for LLM training
+    config  = {}
+  }
+  nemo = {
+    enabled = false  # Prod-only
+    config  = {}
+  }
+}
+
+mlops_pipelines = {
+  kubeflow_pipelines = {
+    enabled = true
+    config  = {}
+  }
+  airflow = {
+    enabled = true
+    config  = {
+      executor = "KubernetesExecutor"
+    }
+  }
+  argo_workflows = {
+    enabled = true
+    config  = {}
+  }
+  metaflow = {
+    enabled = false
+    config  = {}
+  }
+}
+
+# ===== Observability & Governance =====
+mlops_governance = {
+  openlineage = {
+    enabled = true
+    config  = {}
+  }
+  sagemaker_clarify = {
+    enabled = true
+    config  = {}
+  }
+  mlflow_lineage = {
+    enabled = true
+    config  = {}
+  }
+  model_monitoring = {
+    enabled = true
+    config  = {}
+  }
+  whylabs = {
+    enabled = false
+    config  = {}
+  }
+  arize = {
+    enabled = false
+    config  = {}
+  }
+}
+
+# ===== LLM/GenAI =====
+mlops_llm = {
+  # Vector DBs
+  pgvector = {
+    enabled = true
+    config  = {
+      db_instance = "db.t3.medium"
+      dimensions  = 1536
+    }
+  }
+  weaviate = {
+    enabled = false
+    config  = {}
+  }
+  qdrant = {
+    enabled = false
+    config  = {}
+  }
+  pinecone = {
+    enabled = false
+    config  = {}
+  }
+  opensearch_knn = {
+    enabled = false
+    config  = {}
+  }
+
+  # Fine-tuning
+  peft = {
+    enabled = true
+    config  = {}
+  }
+  axolotl = {
+    enabled = false
+    config  = {}
+  }
+  trl = {
+    enabled = false
+    config  = {}
+  }
+
+  # Evaluation
+  ragas = {
+    enabled = true
+    config  = {}
+  }
+  deepeval = {
+    enabled = false
+    config  = {}
+  }
+  trulens = {
+    enabled = false
+    config  = {}
+  }
+  langchain_evals = {
+    enabled = true
+    config  = {}
+  }
+
+  # Orchestration
+  langchain = {
+    enabled = true
+    config  = {}
+  }
+  llamaindex = {
+    enabled = true
+    config  = {}
+  }
+  prompthub = {
+    enabled = false
+    config  = {}
+  }
+}

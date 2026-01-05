@@ -1,0 +1,18 @@
+apiVersion: platform.example.io/v1alpha1
+kind: ClusterRegistry
+metadata:
+  name: mlops-fleet-dev
+spec:
+  clusters:
+    - name: dev-mlops-cluster-01
+      region: us-east-1
+      labels:
+        cluster-type: mlops
+        environment: dev
+        hub: "true"
+    - name: dev-mlops-cluster-02
+      region: us-east-1
+      labels:
+        cluster-type: mlops
+        environment: dev
+
