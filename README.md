@@ -2,50 +2,46 @@
 
 Kubernetes platform for MLOps and AI workloads on AWS EKS. Built with Terraform, ArgoCD, and full Cilium CNI with comprehensive observability and cost monitoring.
 
-**Production Readiness**: 82% (B+) | **Last Updated**: 2026-01-05
-
-[![Security](https://img.shields.io/badge/Security-95%25-green)]() [![Observability](https://img.shields.io/badge/Observability-95%25-green)]() [![Cost%20Mgmt](https://img.shields.io/badge/Cost%20Management-100%25-brightgreen)]() [![HA](https://img.shields.io/badge/High%20Availability-85%25-yellowgreen)]()
-
 ## Architecture
 
 ```mermaid
 graph TB
-    subgraph "Control Plane"
+    subgraph CP[Control Plane]
         ArgoCD[ArgoCD Hub]
         Flux[Flux CD]
         ExternalDNS[External DNS]
     end
 
-    subgraph "Platform Layer"
+    subgraph PL[Platform Layer]
         Cilium[Cilium CNI]
         Karpenter[Karpenter]
         LBC[AWS Load Balancer Controller]
         ESO[External Secrets Operator]
     end
 
-    subgraph "Observability"
+    subgraph OB[Observability]
         Prometheus[Prometheus]
         Grafana[Grafana]
         Alertmanager[Alertmanager]
     end
 
-    subgraph "MLOps Stack"
+    subgraph ML[MLOps Stack]
         MLflow[MLflow]
         Kubeflow[Kubeflow]
         Feast[Feast]
     end
 
-    subgraph "LLM Serving"
+    subgraph LS[LLM Serving]
         vLLM[vLLM]
         Triton[Triton]
         KServe[KServe]
     end
 
-    ArgoCD --> Platform Layer
-    ArgoCD --> Observability
-    ArgoCD --> MLOps Stack
-    ArgoCD --> LLM Serving
-    Flux --> Platform Layer
+    ArgoCD --> PL
+    ArgoCD --> OB
+    ArgoCD --> ML
+    ArgoCD --> LS
+    Flux --> PL
 ```
 
 ## Project Structure
