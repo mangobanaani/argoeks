@@ -4,8 +4,13 @@ set -euo pipefail
 # AWS cost report script for ArgoEKS
 # Generates cost breakdown by environment, service, and tags
 
-START_DATE="${1:-$(date -v-1m +%Y-%m-01)}"  # First day of last month
-END_DATE="${2:-$(date +%Y-%m-%d)}"          # Today
+if date -v-1m +%Y-%m-01 >/dev/null 2>&1; then
+  _last_month=$(date -v-1m +%Y-%m-01)       # BSD (macOS)
+else
+  _last_month=$(date -d "last month" +%Y-%m-01)  # GNU (Linux)
+fi
+START_DATE="${1:-$_last_month}"              # First day of last month
+END_DATE="${2:-$(date +%Y-%m-%d)}"           # Today
 GRANULARITY="${3:-MONTHLY}"
 
 echo "===================================="
