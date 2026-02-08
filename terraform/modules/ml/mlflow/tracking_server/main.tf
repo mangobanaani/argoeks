@@ -112,11 +112,11 @@ resource "aws_security_group" "mlflow_db" {
   }
 
   egress {
-    description = "All outbound"
+    description = "Allow outbound to VPC"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = merge(

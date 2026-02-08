@@ -28,10 +28,11 @@ resource "aws_security_group" "primary" {
     cidr_blocks = [var.primary.vpc_cidr]
   }
   egress {
+    description = "Allow outbound to VPC"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.primary.vpc_cidr]
   }
   tags = var.tags
 }
@@ -111,10 +112,11 @@ resource "aws_security_group" "secondary" {
     cidr_blocks = [var.secondary.vpc_cidr]
   }
   egress {
+    description = "Allow outbound to VPC"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.secondary.vpc_cidr]
   }
   tags = var.tags
 }

@@ -39,10 +39,11 @@ resource "aws_security_group" "db" {
   }
 
   egress {
+    description = "Allow outbound to VPC"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = concat([var.vpc_cidr], var.allowed_cidrs)
   }
 }
 
