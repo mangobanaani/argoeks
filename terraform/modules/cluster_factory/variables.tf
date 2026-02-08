@@ -48,9 +48,14 @@ variable "name_prefix" {
 }
 
 variable "environment" {
-  description = "Environment label: dev|qa|prod"
+  description = "Environment label: dev|qa|prod|sandbox"
   type        = string
   default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "qa", "prod", "sandbox"], var.environment)
+    error_message = "Environment must be one of: dev, qa, prod, sandbox."
+  }
 }
 
 variable "base_cidr" {
