@@ -47,6 +47,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate NAME and SOURCE contain only safe characters (alphanumeric, dash, underscore)
+if [[ ! "${NAME}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "Invalid sandbox name: ${NAME} (only alphanumeric, dash, underscore allowed)" >&2
+  exit 1
+fi
+if [[ ! "${SOURCE}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "Invalid source environment: ${SOURCE} (only alphanumeric, dash, underscore allowed)" >&2
+  exit 1
+fi
+
 SRC_PATH="${ENV_DIR}/${SOURCE}"
 DST_PATH="${ENV_DIR}/${NAME}"
 
@@ -55,7 +65,7 @@ run_cmd() {
     echo "[dry-run] $*"
   else
     echo "+ $*"
-    eval "$@"
+    "$@"
   fi
 }
 
@@ -69,7 +79,7 @@ create_env() {
     exit 3
   fi
 
-  run_cmd "rsync -a ${SRC_PATH}/ ${DST_PATH}/ --exclude='.terraform' --exclude='*.tfstate*' --exclude='.terraform.lock.hcl' --exclude='plan.tfplan'"
+  run_cmd rsync -a "${SRC_PATH}/" "${DST_PATH}/" --exclude='.terraform' --exclude='*.tfstate*' --exclude='.terraform.lock.hcl' --exclude='plan.tfplan'
 
   created_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   meta_path="${DST_PATH}/${META_FILE}"
@@ -89,11 +99,11 @@ EOF
     printf '%s\n' "${meta_content}" > "${meta_path}"
   fi
 
-  run_cmd "terraform -chdir=${DST_PATH} init -upgrade"
+  run_cmd terraform -chdir="${DST_PATH}" init -upgrade
 
   if (( AUTO_APPLY )); then
-    run_cmd "terraform -chdir=${DST_PATH} plan -out=plan.tfplan"
-    run_cmd "terraform -chdir=${DST_PATH} apply -auto-approve plan.tfplan"
+    run_cmd terraform -chdir="${DST_PATH}" plan -out=plan.tfplan
+    run_cmd terraform -chdir="${DST_PATH}" apply -auto-approve plan.tfplan
   fi
 
   echo "Sandbox ${NAME} created at ${DST_PATH}"
@@ -105,9 +115,9 @@ destroy_env() {
     exit 4
   fi
   if [[ -d "${DST_PATH}/.terraform" ]]; then
-    run_cmd "terraform -chdir=${DST_PATH} destroy -auto-approve || true"
+    run_cmd terraform -chdir="${DST_PATH}" destroy -auto-approve || true
   fi
-  run_cmd "rm -rf ${DST_PATH}"
+  run_cmd rm -rf "${DST_PATH}"
   echo "Sandbox ${NAME} destroyed."
 }
 
