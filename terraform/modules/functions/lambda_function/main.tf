@@ -35,7 +35,7 @@ resource "aws_iam_role_policy_attachment" "extra" {
 
 resource "aws_cloudwatch_log_group" "lg" {
   name              = "/aws/lambda/${var.name}"
-  retention_in_days = 400
+  retention_in_days = var.log_retention_days
 }
 
 resource "aws_lambda_function" "fn" {

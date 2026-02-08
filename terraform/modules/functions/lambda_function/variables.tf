@@ -46,3 +46,8 @@ variable "http_routes" {
   type    = list(string)
   default = ["GET /"]
 }
+variable "log_retention_days" {
+  description = "CloudWatch log retention in days for this Lambda function"
+  type        = number
+  default     = 400
+}
