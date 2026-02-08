@@ -170,8 +170,9 @@ variable "argocd_sso_client_id" {
   default = ""
 }
 variable "argocd_sso_client_secret" {
-  type    = string
-  default = ""
+  type      = string
+  default   = ""
+  sensitive = true
 }
 
 # Argo CD exposure: internal NLB by default
