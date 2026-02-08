@@ -55,7 +55,7 @@ resource "helm_release" "argocd" {
               name: SSO
               issuer: ${var.argocd_oidc_issuer}
               clientID: ${var.argocd_oidc_client_id}
-              clientSecret: $oidc.clientSecret
+              clientSecret: ${"oidc.clientSecret"}
               requestedIDTokenClaims:
                 groups:
                   essential: true
