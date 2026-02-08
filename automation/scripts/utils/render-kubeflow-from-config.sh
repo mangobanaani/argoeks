@@ -42,8 +42,15 @@ connectors:
     scopes: [openid, email, profile]
 YAML
 
-sed -i '' -e "s#REPLACE_WITH_ACM_CERT_ARN#${cert_arn}#g" "$over/patches/istio-gateway-svc.yaml" || true
-sed -i '' -e "s#REPLACE_WITH_S3_BUCKET_NAME#${bucket}#g" -e "s#REPLACE_WITH_REGION#${region}#g" "$over/patches/pipeline-configmap.yaml" || true
+if sed --version >/dev/null 2>&1; then
+  # GNU sed
+  sed -i -e "s#REPLACE_WITH_ACM_CERT_ARN#${cert_arn}#g" "$over/patches/istio-gateway-svc.yaml" || true
+  sed -i -e "s#REPLACE_WITH_S3_BUCKET_NAME#${bucket}#g" -e "s#REPLACE_WITH_REGION#${region}#g" "$over/patches/pipeline-configmap.yaml" || true
+else
+  # BSD sed (macOS)
+  sed -i '' -e "s#REPLACE_WITH_ACM_CERT_ARN#${cert_arn}#g" "$over/patches/istio-gateway-svc.yaml" || true
+  sed -i '' -e "s#REPLACE_WITH_S3_BUCKET_NAME#${bucket}#g" -e "s#REPLACE_WITH_REGION#${region}#g" "$over/patches/pipeline-configmap.yaml" || true
+fi
 
 echo "Rendered Kubeflow overlay for ${ENV}. Update Dex clientSecret via ExternalSecret or replace inline before apply."
 
