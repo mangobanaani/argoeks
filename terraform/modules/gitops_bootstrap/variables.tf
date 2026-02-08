@@ -74,8 +74,9 @@ variable "argocd_oidc_client_id" {
   default = ""
 }
 variable "argocd_oidc_client_secret" {
-  type    = string
-  default = ""
+  type      = string
+  default   = ""
+  sensitive = true
 }
 
 variable "argocd_server_service_type" {
