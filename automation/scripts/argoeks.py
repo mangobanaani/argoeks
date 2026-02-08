@@ -19,7 +19,7 @@ def run_subprocess(cmd: list[str], dry_run: bool = False, verbose: bool = False)
         print(f"$ {printable}")
     if dry_run:
         return 0
-    completed = subprocess.run(cmd, check=True)
+    completed = subprocess.run(cmd)
     return completed.returncode
 
 
