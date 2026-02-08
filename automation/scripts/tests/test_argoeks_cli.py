@@ -37,24 +37,22 @@ def test_env_apply_auto_approve(monkeypatch):
     )]
 
 
-def test_docs_status(monkeypatch, tmp_path):
+def test_docs_print_only(monkeypatch, tmp_path):
+    doc = tmp_path / "test.md"
+    doc.write_text("hello")
     runner = Runner()
     monkeypatch.setattr(cli, "run_subprocess", runner)
-    cli.main(["docs", "status"])
-    assert runner.calls[0][0][0].endswith("check-doc-freshness.sh")
-
-
-def test_docs_open_print_only(monkeypatch):
-    monkeypatch.setattr(cli, "load_docs", lambda: {"quick start": {"name": "Quick Start", "path": "docs/QuickStart.md"}})
-    runner = Runner()
-    monkeypatch.setattr(cli, "run_subprocess", runner)
-    cli.main(["docs", "open", "--name", "Quick Start", "--print-only"])
+    monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
+    rc = cli.main(["docs", "--path", "test.md", "--print-only"])
+    assert rc == 0
     assert runner.calls == []
 
 
-def test_docs_open_runs_less(monkeypatch):
-    monkeypatch.setattr(cli, "load_docs", lambda: {"readme": {"name": "Root README", "path": "README.md"}})
+def test_docs_runs_less(monkeypatch, tmp_path):
+    doc = tmp_path / "README.md"
+    doc.write_text("readme")
     runner = Runner()
     monkeypatch.setattr(cli, "run_subprocess", runner)
-    cli.main(["docs", "open", "--name", "readme"])
+    monkeypatch.setattr(cli, "REPO_ROOT", tmp_path)
+    cli.main(["docs", "--path", "README.md"])
     assert runner.calls[0][0][0] == "less"
