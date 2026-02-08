@@ -582,7 +582,7 @@ module "rds_postgres" {
   name                  = "prod-mlops-postgres"
   vpc_id                = module.cluster_factory_primary.vpc_ids[module.cluster_factory_primary.cluster_names[0]]
   subnet_ids            = module.cluster_factory_primary.private_subnets[module.cluster_factory_primary.cluster_names[0]]
-  vpc_cidr              = "10.128.0.0/8"
+  vpc_cidr              = var.base_cidr_primary
   instance_class        = var.rds_instance_class
   backup_retention_days = var.rds_backup_retention
   skip_final_snapshot   = var.rds_skip_final_snapshot
