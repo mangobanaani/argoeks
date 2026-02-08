@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive terraform/
+      - name: Shellcheck
+        run: |
+          sudo apt-get install -y shellcheck
+          find scripts/ automation/scripts/ terraform/environments/*/scripts/ \
+            -name '*.sh' -type f 2>/dev/null | xargs --no-run-if-empty shellcheck
+
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env_name: [dev, qa, prod]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+      - name: Terraform init (${{ matrix.env_name }})
+        run: terraform -chdir=terraform/environments/${{ matrix.env_name }} init -backend=false -input=false
+      - name: Terraform validate (${{ matrix.env_name }})
+        run: terraform -chdir=terraform/environments/${{ matrix.env_name }} validate -no-color
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dev requirements
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest automation/scripts/tests -v
+
+  trivy-iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy IaC scan (Terraform)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: terraform/
+          scanners: misconfig
+          format: sarif
+          output: trivy-terraform.sarif
+          severity: HIGH,CRITICAL
+      - name: Upload Terraform scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-terraform.sarif
+          category: trivy-terraform
+
+  trivy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy config scan (Kubernetes)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: kubernetes/
+          format: sarif
+          output: trivy-kubernetes.sarif
+          severity: HIGH,CRITICAL
+      - name: Upload Kubernetes scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-kubernetes.sarif
+          category: trivy-kubernetes

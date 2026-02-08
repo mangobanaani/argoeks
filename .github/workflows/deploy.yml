@@ -1,0 +1,77 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+          - sandbox
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TERRAFORM_VERSION: "1.7.5"
+  AWS_REGION: us-east-1
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Terraform init
+        working-directory: terraform/environments/${{ inputs.environment }}
+        run: terraform init -input=false
+      - name: Terraform validate
+        working-directory: terraform/environments/${{ inputs.environment }}
+        run: terraform validate -no-color
+      - name: Terraform plan
+        working-directory: terraform/environments/${{ inputs.environment }}
+        run: terraform plan -input=false -out=plan.tfplan
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: terraform/environments/${{ inputs.environment }}/plan.tfplan
+          retention-days: 7
+
+  apply:
+    runs-on: ubuntu-latest
+    needs: plan
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: terraform/environments/${{ inputs.environment }}
+      - name: Terraform init
+        working-directory: terraform/environments/${{ inputs.environment }}
+        run: terraform init -input=false
+      - name: Terraform apply
+        working-directory: terraform/environments/${{ inputs.environment }}
+        run: terraform apply -input=false -auto-approve plan.tfplan
