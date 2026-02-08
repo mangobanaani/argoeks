@@ -37,7 +37,7 @@ resource "aws_vpc_endpoint" "mlops" {
 }
 
 resource "aws_security_group" "vpc_endpoints" {
-  name_description = "${var.name_prefix}-mlops-vpc-endpoints"
+  name        = "${var.name_prefix}-mlops-vpc-endpoints"
   description      = "Security group for MLOps VPC endpoints"
   vpc_id           = var.vpc_id
 
