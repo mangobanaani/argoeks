@@ -602,9 +602,9 @@ module "redis" {
   source     = "../../modules/cache/elasticache_redis"
   count      = var.enable_redis ? 1 : 0
   name       = "prod-mlops-redis"
-  vpc_id     = module.cluster_factory.vpc_ids[module.cluster_factory.cluster_names[0]]
-  subnet_ids = module.cluster_factory.private_subnets[module.cluster_factory.cluster_names[0]]
-  vpc_cidr   = "10.128.0.0/8"
+  vpc_id     = module.cluster_factory_primary.vpc_ids[module.cluster_factory_primary.cluster_names[0]]
+  subnet_ids = module.cluster_factory_primary.private_subnets[module.cluster_factory_primary.cluster_names[0]]
+  vpc_cidr   = var.base_cidr_primary
 }
 
 module "msk_primary" {
