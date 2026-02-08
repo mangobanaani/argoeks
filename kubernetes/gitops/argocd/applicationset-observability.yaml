@@ -24,8 +24,8 @@ spec:
           valueFiles:
             - values.yaml
           parameters:
-            - name: grafana.adminPassword
-              value: "admin"
+            - name: grafana.admin.existingSecret
+              value: "grafana-admin-credentials"
             - name: prometheus.prometheusSpec.externalLabels.cluster
               value: "{{name}}"
             - name: prometheus.prometheusSpec.thanos.objectStorageConfig.existingSecret
